@@ -37,6 +37,19 @@ the floor (static backlog only), `?debug` exposes `window.__lounge` (store) for 
 home indicator 34pt) for screenshot comparison; `?fixture=ref` swaps in a channel
 list / chat with the same row structure as the reference screenshots.
 
+## Deploy on Vercel
+
+No environment variables are required for this version (`NEXT_PUBLIC_LOUNGE_ACCENT` is optional).
+
+- **From GitHub (recommended):** vercel.com → Add New → Project → import this repo →
+  framework "Next.js" is detected, install/build commands stay default → Deploy.
+- **From the zip:** unzip, then in that folder run `npx vercel` (first deploy, creates the
+  project) and `npx vercel --prod`. Vercel detects pnpm from `pnpm-lock.yaml`.
+
+Note: the NPC floor runs in each visitor's browser in this version, so it works on
+Vercel with no database. Persistence (Phase 2) needs a hosted database on Vercel —
+see `.env.example`.
+
 ## What works in Phase 1
 
 - Server rail with selection / unread pills and mention badges; three guilds.
