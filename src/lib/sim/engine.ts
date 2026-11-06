@@ -216,7 +216,9 @@ export function useSimulation(enabled: boolean) {
             ? replyCategory(eff, replyTo.simTag, rng)
             : ELIAS_TAGS.has(replyTo.simTag ?? "") && rng() < 0.7
               ? eliasCategory(eff.glaze, rng)
-              : freshCategory(st.sim, eff, parsed.topics.length > 0, rng)
+              : replyTo.simTag === "prompt" && parsed.topics.length && rng() < 0.6
+                ? "prompt"
+                : freshCategory(st.sim, eff, parsed.topics.length > 0, rng)
         : freshCategory(st.sim, eff, parsed.topics.length > 0, rng);
       const c = composeAny(category, author, channelId, parsed, replyAuthor?.displayName);
       return c ? { c, author, replyToId: replyTo?.id } : null;
@@ -329,12 +331,38 @@ export function useSimulation(enabled: boolean) {
       }
     });
 
-    /* ── the owner speaks → people answer ── */
+    /* ── a human speaks → people answer (owner: the usual crowd; guests: a welcome) ── */
+    const handled = new Set<string>();
+    const startedAt = Date.now();
     const unsubscribe = useLounge.subscribe((state, prev) => {
-      if (state.messages.length <= prev.messages.length) return;
-      const last = state.messages[state.messages.length - 1]!;
-      if (!last.isHuman || last.authorId !== state.viewerId || state.sim.paused) return;
+      if (state.messages === prev.messages || state.sim.paused) return;
+      // Own messages are answered once, on the optimistic copy (m_local_); others' by server id.
+      const last = state.messages
+        .slice(-12)
+        .reverse()
+        .find(
+          (m) =>
+            m.isHuman &&
+            !m.failed &&
+            m.createdAt >= startedAt - 5000 &&
+            !handled.has(m.id) &&
+            (m.authorId === state.viewerId ? m.id.startsWith("m_local_") : true),
+        );
+      if (!last) return;
+      handled.add(last.id);
       const a = state.sim.activity;
+      if (state.users[last.authorId]?.roleId !== "owner") {
+        const guest = state.users[last.authorId];
+        later(rand(rng, 1500, 3500) / Math.sqrt(a), () => {
+          const st = S();
+          const parsed = parsePrompt(st.sim.prompt);
+          const author = pickAuthor(last.channelId);
+          if (!author) return;
+          const c = composeAny(last.channelId === "c_intros" || rng() < 0.4 ? "greet" : "agree", author, last.channelId, parsed, guest?.displayName);
+          if (c) postWithTyping(last.channelId, { c, author, replyToId: last.id });
+        });
+        return;
+      }
       const replies = 1 + (rng() < 0.6 ? 1 : 0) + (rng() < 0.25 * a ? 1 : 0);
       let delay = rand(rng, 900, 2600) / Math.sqrt(a);
       const used: string[] = [];

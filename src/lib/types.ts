@@ -134,6 +134,9 @@ export interface Message {
   i18n?: { en: string; de: string };
   /** Simulator bookkeeping (category of the generated line) */
   simTag?: string;
+  /** Client-only: optimistic send in flight / failed with reason. */
+  pending?: boolean;
+  failed?: string;
 }
 
 export interface ChannelReadState {

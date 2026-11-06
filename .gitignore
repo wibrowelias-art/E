@@ -9,3 +9,4 @@ data/*.db
 data/*.db-*
 .DS_Store
 data/seed.json
+dist

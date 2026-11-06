@@ -2,7 +2,7 @@
 
 import { LANGS } from "@/lib/i18n";
 import { useLounge, useT } from "@/lib/store";
-import { CheckIcon, GlobeIcon, SlidersIcon } from "./icons";
+import { ArrowLeft, CheckIcon, GlobeIcon, SlidersIcon } from "./icons";
 
 /** Small menu from the gear (desktop) or the user card (mobile): language + Backstage. */
 export function SettingsMenu() {
@@ -11,6 +11,8 @@ export function SettingsMenu() {
   const lang = useLounge((s) => s.lang);
   const setLang = useLounge((s) => s.setLang);
   const openBackstage = useLounge((s) => s.openBackstage);
+  const isOwner = useLounge((s) => s.role === "owner");
+  const logout = useLounge((s) => s.logout);
   const t = useT();
   if (!at) return null;
   const style = at.mobile ? undefined : { left: Math.max(8, at.x - 200), top: Math.max(8, at.y - 8), transform: "translateY(-100%)" };
@@ -38,14 +40,22 @@ export function SettingsMenu() {
           </button>
         ))}
         <div className="smenu__sep" />
-        <button className="smenu__item" role="menuitem" onClick={() => openBackstage(true)}>
-          <span className="smenu__icon">
-            <SlidersIcon size={20} />
+        {isOwner && (
+          <button className="smenu__item" role="menuitem" onClick={() => openBackstage(true)}>
+            <span className="smenu__icon">
+              <SlidersIcon size={20} />
+            </span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="smenu__title">{t.backstage}</span>
+              <span className="smenu__hint">{t.backstageHint}</span>
+            </span>
+          </button>
+        )}
+        <button className="smenu__item smenu__item--danger" role="menuitem" onClick={() => void logout()}>
+          <span className="smenu__icon smenu__icon--plain">
+            <ArrowLeft size={18} />
           </span>
-          <span className="min-w-0 flex-1 text-left">
-            <span className="smenu__title">{t.backstage}</span>
-            <span className="smenu__hint">{t.backstageHint}</span>
-          </span>
+          <span className="smenu__title">{t.logout}</span>
         </button>
       </div>
     </>

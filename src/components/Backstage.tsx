@@ -156,6 +156,8 @@ export function Backstage() {
   const log = useLounge((s) => s.simLog);
   const users = useLounge((s) => s.users);
   const channelId = useLounge((s) => s.channelByGuild[s.guildId]);
+  const persistence = useLounge((s) => s.persistence);
+  const persistenceNote = useLounge((s) => s.persistenceNote);
   const c = COPY[lang];
   const parsed = useMemo(() => parsePrompt(sim.prompt), [sim.prompt]);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -178,6 +180,16 @@ export function Backstage() {
             <div>
               <h1 className="bs__title">{c.title}</h1>
               <p className="bs__sub">{c.sub}</p>
+              <p className="bs__status" data-on={persistence}>
+                <i />
+                {persistence
+                  ? lang === "de"
+                    ? "Datenbank verbunden — Nachrichten und Einstellungen werden gespeichert und mit Gästen geteilt."
+                    : "Database connected — messages and settings are saved and shared with guests."
+                  : lang === "de"
+                    ? `Lokaler Modus — nichts wird gespeichert. ${persistenceNote ?? ""}`
+                    : `Local mode — nothing is saved. ${persistenceNote ?? ""}`}
+              </p>
             </div>
             <button ref={closeRef} className="bs__close" onClick={() => openBackstage(false)} aria-label="Close">
               <CloseIcon size={20} />

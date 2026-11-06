@@ -11,15 +11,19 @@
     "seed": "tsx scripts/seed.ts",
     "shots": "node scripts/compare.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "sim:check": "node scripts/sim-check.mjs"
+    "sim:check": "node scripts/sim-check.mjs",
+    "db:reset": "tsx --env-file-if-exists=.env.local scripts/db.ts reset",
+    "db:status": "tsx --env-file-if-exists=.env.local scripts/db.ts status",
+    "api:check": "node scripts/api-check.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/figtree": "^5.2.0",
+    "@libsql/client": "^0.18.0",
     "next": "15.5.29",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "react-virtuoso": "^4.18.0",
-    "zustand": "^5.0.0",
-    "@fontsource-variable/figtree": "^5.2.0"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",

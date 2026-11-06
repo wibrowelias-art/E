@@ -94,7 +94,10 @@ function useComposer() {
     }
   };
   const t = useT();
-  return { channel, value, setValue, onKeyDown, t };
+  const canPost = useLounge((st) => st.ready && st.canPost(channel.id));
+  const role = useLounge((st) => st.role);
+  const readOnlyText = role === "tourist" ? t.guestReadOnly(channel.name) : t.readOnly(channel.name);
+  return { channel, value, setValue, onKeyDown, t, canPost, readOnlyText };
 }
 
 function useAutosize(value: string) {
@@ -136,6 +139,11 @@ function DesktopComposer({ c }: { c: ReturnType<typeof useComposer> }) {
   return (
     <div className="composer">
       <ReplyBanner />
+      {!c.canPost ? (
+        <div className="composer__readonly" role="note">
+          {c.readOnlyText}
+        </div>
+      ) : (
       <div className="composer__box">
         <button className="composer__attach" aria-label="Upload a file">
           <span
@@ -167,6 +175,7 @@ function DesktopComposer({ c }: { c: ReturnType<typeof useComposer> }) {
           </button>
         </div>
       </div>
+      )}
       <Typing />
     </div>
   );
@@ -182,6 +191,11 @@ function MobileComposer({ c }: { c: ReturnType<typeof useComposer> }) {
         <Typing />
       </div>
       <ReplyBanner />
+      {!c.canPost ? (
+        <div className="mcomposer__box mcomposer__box--readonly" role="note">
+          {c.readOnlyText}
+        </div>
+      ) : (
       <div className="mcomposer__box">
         <button className="mcomposer__btn mcomposer__plus" aria-label="Upload a file">
           <PlusIcon size={25} strokeWidth={2} />
@@ -217,6 +231,7 @@ function MobileComposer({ c }: { c: ReturnType<typeof useComposer> }) {
           <SendIcon size={23} />
         </button>
       </div>
+      )}
     </div>
   );
 }

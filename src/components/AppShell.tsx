@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { GUILD_SLUG_BY_ID, GUILD_SLUGS, GUILDS } from "@/data/guilds";
+import { api } from "@/lib/api";
 import { useSimulation } from "@/lib/sim/engine";
+import { enableSimSync } from "@/lib/sync";
+import type { Message, User } from "@/lib/types";
 import { useCurrentGuild, useLounge, type MobilePane } from "@/lib/store";
 import { Backstage } from "./Backstage";
 import { SettingsMenu } from "./SettingsMenu";
@@ -23,6 +26,7 @@ interface Props {
 function TitleBar() {
   const guild = useCurrentGuild();
   const openBackstage = useLounge((s) => s.openBackstage);
+  const isOwner = useLounge((s) => s.role === "owner");
   return (
     <div className="titlebar">
       <span className="titlebar__icon [&>svg]:h-full [&>svg]:w-full">
@@ -30,9 +34,11 @@ function TitleBar() {
       </span>
       <span>{guild.name}</span>
       <div className="titlebar__right">
-        <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Backstage" title="Backstage" onClick={() => openBackstage(true)}>
-          <SlidersIcon size={19} />
-        </button>
+        {isOwner && (
+          <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Backstage" title="Backstage" onClick={() => openBackstage(true)}>
+            <SlidersIcon size={19} />
+          </button>
+        )}
         <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Inbox">
           <InboxIcon size={20} />
         </button>
@@ -44,15 +50,87 @@ function TitleBar() {
   );
 }
 
+function Toast() {
+  const toast = useLounge((s) => s.toast);
+  if (!toast) return null;
+  return (
+    <div className="toast" data-kind={toast.kind} role="status" aria-live="polite">
+      {toast.text}
+    </div>
+  );
+}
+
+/** Poll for new/edited messages, reactions and presence (spec: every 1–2s). */
+function usePoller(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      const st = useLounge.getState();
+      try {
+        const res = await api<{ messages: Message[]; users: User[]; rev: number }>(`/api/poll?since=${st.rev}`);
+        if (!stopped && (res.messages.length || res.users.length || res.rev !== st.rev)) st.mergeServer(res.messages, res.users, res.rev);
+      } catch {
+        /* transient — try again on the next tick */
+      }
+      if (!stopped) timer = setTimeout(tick, document.hidden ? 6000 : 1500);
+    };
+    timer = setTimeout(tick, 1500);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [enabled]);
+}
+
+/**
+ * Who runs the floor: in local mode every browser runs its own; with a database
+ * only the owner's browser does (and only one tab, via the Web Locks API) and
+ * its output is synced to the server for everyone else.
+ */
+function useFloorRunner(wanted: boolean, shared: boolean) {
+  const [holder, setHolder] = useState(false);
+  useEffect(() => {
+    if (!wanted) return setHolder(false);
+    if (!shared || typeof navigator === "undefined" || !("locks" in navigator)) {
+      setHolder(true);
+      return;
+    }
+    const abort = new AbortController();
+    let release: () => void = () => {};
+    navigator.locks
+      .request("lounge-floor", { signal: abort.signal }, () => {
+        setHolder(true);
+        return new Promise<void>((resolve) => (release = resolve));
+      })
+      .catch(() => {});
+    return () => {
+      abort.abort();
+      release();
+      setHolder(false);
+    };
+  }, [wanted, shared]);
+  useEffect(() => {
+    enableSimSync(holder && shared);
+    return () => enableSimSync(false);
+  }, [holder, shared]);
+  return holder;
+}
+
 export function AppShell({ guildSlug, channelName, initialPane }: Props) {
-  const hydrate = useLounge((s) => s.hydrate);
+  const boot = useLounge((s) => s.boot);
   const mobilePane = useLounge((s) => s.mobilePane);
   const membersOpen = useLounge((s) => s.membersOpen);
   const ready = useLounge((s) => s.ready);
   const fixture = useLounge((s) => s.fixture);
+  const persistence = useLounge((s) => s.persistence);
+  const role = useLounge((s) => s.role);
   const [frame, setFrame] = useState<string | undefined>();
   const [simOn, setSimOn] = useState(false);
-  useSimulation(ready && simOn && !fixture);
+  usePoller(ready && persistence);
+  const runsFloor = useFloorRunner(ready && simOn && !fixture && (!persistence || role === "owner"), persistence);
+  useSimulation(runsFloor);
 
   // Hydrate client-side only: timestamps are relative to the visitor's clock.
   useEffect(() => {
@@ -74,11 +152,15 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
     const lang = params.get("lang");
     if (lang === "en" || lang === "de") useLounge.getState().setLang(lang);
     document.documentElement.lang = useLounge.getState().lang;
-    if (params.get("backstage") === "1") useLounge.getState().openBackstage(true);
     setSimOn(params.get("sim") !== "off");
     if (params.has("debug")) (window as unknown as { __lounge: typeof useLounge }).__lounge = useLounge;
     const delay = Number(params.get("delay") ?? 0);
-    const t = setTimeout(() => hydrate(Date.now()), delay);
+    const forceLocal = params.get("local") === "1" || params.get("fixture") === "ref";
+    const t = setTimeout(() => {
+      void boot({ now: Date.now(), forceLocal }).then(() => {
+        if (params.get("backstage") === "1") useLounge.getState().openBackstage(true);
+      });
+    }, delay);
     const tick = setInterval(() => useLounge.setState({ now: Date.now() }), 60_000);
     return () => {
       clearTimeout(t);
@@ -123,6 +205,7 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
       <ProfilePopout />
       <SettingsMenu />
       <Backstage />
+      <Toast />
     </div>
   );
 }

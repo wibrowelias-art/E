@@ -45,6 +45,13 @@ const en = {
   backstage: "Backstage",
   backstageHint: "Vibe, chaos, glaze and drama controls",
   serverOwner: "Server owner",
+  logout: "Log out",
+  guestReadOnly: (c: string) => `You're visiting as a guest — #${c} is read-only. Say hi in #introductions!`,
+  readOnly: (c: string) => `#${c} is read-only.`,
+  failed: "Failed to send.",
+  retry: "Retry",
+  discard: "Discard",
+  loadingOlder: "Loading older messages…",
 };
 
 export type Strings = typeof en;
@@ -86,6 +93,13 @@ const de: Strings = {
   backstage: "Backstage",
   backstageHint: "Vibe, Chaos, Glaze und Drama einstellen",
   serverOwner: "Serverinhaber",
+  logout: "Abmelden",
+  guestReadOnly: (c) => `Du bist als Gast hier — #${c} ist nur lesbar. Sag hallo in #introductions!`,
+  readOnly: (c) => `#${c} ist nur lesbar.`,
+  failed: "Senden fehlgeschlagen.",
+  retry: "Nochmal",
+  discard: "Verwerfen",
+  loadingOlder: "Ältere Nachrichten werden geladen …",
 };
 
 export const STRINGS: Record<Lang, Strings> = { en, de };

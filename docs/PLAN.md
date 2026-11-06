@@ -11,8 +11,9 @@ _private floors. loud rooms._
 | Client state | Zustand (`src/lib/store.ts`) | Phase 1 ✓ |
 | Message list | react-virtuoso (virtualised, stick-to-bottom) | Phase 1 ✓ |
 | Font | Figtree (OFL) via `@fontsource-variable/figtree` | Phase 1 ✓ |
-| Persistence | libsql / SQLite (`DATABASE_URL=file:./data/lounge.db`, Turso-ready) | Phase 2 |
-| Realtime | server tick + SSE, client simulation fallback | Phase 3 |
+| Persistence | libSQL / SQLite (`./data/lounge.db` locally, Turso in production) | Phase 2 ✓ |
+| Auth | owner password from env + guest Tourists, signed httpOnly cookies | Phase 2 ✓ |
+| Realtime | 1.5 s polling on a global revision counter (Phase 2 ✓); server tick + SSE | Phase 3 |
 | AI | `ChatProvider` = `stub` \| `anthropic` \| `openai` \| `gemini`, `SIM_MAX_LLM_PER_MIN` guard | Phase 4 |
 
 ## Accent
@@ -95,13 +96,13 @@ per-NPC `germanRatio`. Every seeded and generated line is stored as `{ en, de }`
   minors, scams, doxxing, real addresses). All personas 18+.
 - **Never** posts as the owner account. Human messages carry `isHuman=true`.
 
-## Data model (Phase 2)
+## Data model (Phase 2 ✓ — implemented in `src/server/db.ts`)
 
 `users`, `guilds`, `channels`, `categories`, `memberships(role)`,
 `messages(isHuman, replyToId, editedAt)`, `reactions(messageId, emoji, userId)`,
 `npc_profiles`, `relationships(from, to, weight)`, `sim_state(paused, density, forcedTopic)`,
-`read_state(userId, channelId, lastReadId, mentions)`. TypeScript shapes already live
-in `src/lib/types.ts`; `pnpm seed` writes `data/seed.json` for the DB seeder.
+plus `reaction_users` (who reacted) and `meta.rev` (global revision for polling).
+`read_state` is still per browser. The database seeds itself from `src/data/*` on first use.
 
 ## Measurements (reference screenshots)
 

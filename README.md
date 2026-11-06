@@ -6,32 +6,41 @@ A dark, Discord-class community app for **GOD // THE LOUNGE** — a Hamburg serv
 that should feel packed and alive the moment you open it. Original name, logo,
 icons and content; no Discord assets, fonts or trademarks.
 
-> **Status: Phase 0 + Phase 1 done, plus an early slice of Phase 3.** The full UI,
-> an English/Deutsch language switch, **Backstage** (activity, glaze ratio, drama,
-> vibe prompt, presets) and a built-in-lines NPC simulator that runs in the
-> browser. Still to come: persistence + login (Phase 2), the server-side
-> always-on tick (Phase 3), live AI providers (Phase 4). See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status: Phases 0–2 done, plus an early slice of Phase 3.** UI matched to the
+> reference screenshots, English/Deutsch, **Backstage**, a built-in-lines NPC floor,
+> and now **persistence + login**: messages, edits and reactions live in a libSQL
+> database, history loads from it, everyone sees the same floor through a 1.5 s poll,
+> the owner signs in with a password and guests can look around as Tourists.
+> Still to come: the server-side always-on tick (Phase 3) and live AI providers (Phase 4).
+> See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Run
 
 ```bash
 pnpm install
-cp .env.example .env.local   # optional in Phase 1
-pnpm dev                     # http://localhost:3000
+cp .env.example .env.local   # then set LOUNGE_OWNER_EMAIL + LOUNGE_OWNER_PASSWORD
+pnpm dev                     # http://localhost:3000 → /login
 ```
+
+Local development creates `./data/lounge.db` (SQLite) on the first request and seeds it
+with the guilds, the 32 NPCs and the backlog. `pnpm db:reset` wipes and re-seeds it.
 
 | Script | What it does |
 | --- | --- |
 | `pnpm dev` / `pnpm build` / `pnpm start` | Next.js dev / production build / serve |
 | `pnpm typecheck` | `tsc --noEmit` (strict) |
+| `pnpm db:reset` / `pnpm db:status` | Wipe + re-seed the database / show row counts (uses `DATABASE_URL` or `./data/lounge.db`) |
+| `pnpm api:check` | Phase 2 API tests: auth, persistence, poll, edits, reactions, history paging, guest limits, owner-only routes, safety filter |
 | `pnpm seed` | Validates the 32-NPC cast, channel map and backlog (ages 20–34, no duplicate lines, nothing posted as Elias) and writes `data/seed.json` |
 | `pnpm shots` | Renders every screen and the CURRENT vs REFERENCE sheets into `docs/screenshots/` (needs a running server, `BASE_URL` to override) |
-| `pnpm smoke` | Interaction checks: Enter / Shift+Enter, ↑ edit, Esc, reactions, channel switch, language switch, Backstage, mobile navigation |
+| `pnpm smoke` | Browser checks: login form, send → reload → still there, ↑ edit, Esc, reactions, language switch, Backstage, guest read-only, owner floor reaching a guest through the database, mobile navigation |
 | `pnpm sim:check` | Simulator acceptance tests with a fake clock (cold open, 5-minute volume, duplicates, Elias share, every Backstage control) |
 
 URLs: `/` (mobile opens on the channel list), `/channels/lounge/<channel>`,
 `/channels/lab/roadmap`, `/channels/darkroom/darkroom`.
-Debug params: `?lang=en|de`, `?backstage=1` opens Backstage, `?sim=off` freezes
+The test scripts sign in with the owner credentials from `.env.local`.
+
+Debug params: `?local=1` ignores the database (static backlog, nothing saved), `?lang=en|de`, `?backstage=1` opens Backstage, `?sim=off` freezes
 the floor (static backlog only), `?debug` exposes `window.__lounge` (store) for tests,
 `?frame=ios` simulates the iPhone safe areas (status bar 51pt,
 home indicator 34pt) for screenshot comparison; `?fixture=ref` swaps in a channel
@@ -39,16 +48,57 @@ list / chat with the same row structure as the reference screenshots.
 
 ## Deploy on Vercel
 
-No environment variables are required for this version (`NEXT_PUBLIC_LOUNGE_ACCENT` is optional).
+1. **Database (for persistence):** create a free libSQL database on [Turso](https://turso.tech)
+   (`turso db create the-lounge`, `turso db show the-lounge --url`, `turso db tokens create the-lounge`).
+   The schema and seed data are created automatically on the first request.
+2. **Environment variables** (Project → Settings → Environment Variables):
 
-- **From GitHub (recommended):** vercel.com → Add New → Project → import this repo →
-  framework "Next.js" is detected, install/build commands stay default → Deploy.
-- **From the zip:** unzip, then in that folder run `npx vercel` (first deploy, creates the
-  project) and `npx vercel --prod`. Vercel detects pnpm from `pnpm-lock.yaml`.
+   | Variable | Value |
+   | --- | --- |
+   | `LOUNGE_OWNER_EMAIL` | your login email |
+   | `LOUNGE_OWNER_PASSWORD` | a strong password (`change-me` is refused in production) |
+   | `DATABASE_URL` | `libsql://the-lounge-<org>.turso.io` |
+   | `DATABASE_AUTH_TOKEN` | the Turso token |
+   | `LOUNGE_SESSION_SECRET` | optional, any long random string |
 
-Note: the NPC floor runs in each visitor's browser in this version, so it works on
-Vercel with no database. Persistence (Phase 2) needs a hosted database on Vercel —
-see `.env.example`.
+3. **Deploy:** import the GitHub repo (framework "Next.js", default commands), or from the
+   zip: unzip, `npx vercel`, then `npx vercel --prod`.
+
+Without `DATABASE_URL` the deploy still works: it runs in local mode (each visitor's
+browser runs its own floor, nothing is saved) and the login page says so. Without an owner
+password *and* without a database, the login page offers a demo owner entry; as soon as
+either is configured, demo mode switches off.
+
+## Accounts & persistence (Phase 2)
+
+| Who | How | Can |
+| --- | --- | --- |
+| **Elias (owner)** | `/login` with `LOUNGE_OWNER_EMAIL` / `LOUNGE_OWNER_PASSWORD` | everything: all channels incl. Staff, Backstage, runs the NPC floor |
+| **Tourist (guest)** | "Continue as guest" (optional name) | read every non-staff channel, react, post in `#introductions` |
+
+- Sessions are signed httpOnly cookies (HMAC-SHA256, 30 days), so they work with or without
+  a database. Wrong passwords are slowed down; checks are constant-time.
+- Human messages are stored with `is_human = 1`; the simulator can only write as NPCs — the
+  server rejects any simulator line that claims to be Elias, the bot or a guest.
+- **Data flow:** `/api/bootstrap` loads users + the last 120 messages per channel; scrolling
+  up pages older history from `/api/messages/history`; `/api/poll?since=<rev>` every 1.5 s
+  (6 s in a background tab) returns everything changed since a global revision counter —
+  new messages, edits, reactions, presence and voice changes.
+- **Sending** is optimistic: the message appears instantly, turns solid when the server
+  confirms, or shows "Failed to send — Retry / Discard".
+- **The floor:** with a database, only the owner's browser runs the simulator (one tab, via
+  the Web Locks API) and syncs its output to the server once a second; guests see it through
+  the poll. Phase 3 moves this to a server tick so it keeps going with nobody online.
+- **Safety filter** (server-side on every human post/edit and every simulator line, and in
+  `pnpm seed` for the phrase banks): sexual content involving minors, scams / money requests,
+  doxxing (street addresses, phone numbers, IBANs, licence plates) are blocked with a message.
+- Rate limits: owner 8 messages / 5 s, guests 3 / 6 s (per server instance).
+- **Not yet:** read state is per browser (not stored), typing indicators are only visible in
+  the owner's browser, no magic-link login, no account management beyond the owner + guests.
+
+Tables: `users`, `guilds`, `categories`, `channels`, `memberships`, `messages`, `reactions`,
+`reaction_users`, `npc_profiles`, `relationships`, `sim_state`, `meta` (revision counter) —
+see `src/server/db.ts`.
 
 ## What works in Phase 1
 
@@ -138,7 +188,10 @@ src/components/     AppShell, ServerRail, ChannelPanel, Chat, MessageList, Messa
 src/data/           npcs.ts (cast), guilds.ts (channel map), messages.ts (backlog),
                     seed.ts (assembly + validation), fixture.ts (comparison fixtures)
 src/lib/            types, zustand store, markup renderer, time formatting
-scripts/            seed.ts, compare.mjs (screenshots), smoke.mjs (interaction checks)
+scripts/            seed.ts, db.ts, compare.mjs (screenshots), smoke.mjs, api-check.mjs, sim-check.mjs
+src/server/         db (schema, seed), auth (sessions), repo (queries + permissions), http helpers
+src/app/api/        auth, bootstrap, poll, messages (+ history, edit, reactions), sim (batch, settings)
+src/app/login/      sign-in page
 src/lib/sim/        settings + presets, phrase banks (EN + DE), brain (stub composer), engine (clock)
 src/lib/i18n.ts     UI strings (English / Deutsch)
 docs/               PLAN.md (Phase 0), reference/ (privacy-blurred references), screenshots/

@@ -4,9 +4,13 @@
  * Phase 4 swaps `composeLine` for a ChatProvider call when an AI key exists.
  */
 import { fingerprint } from "@/data/seed";
+import { safetyCheck } from "@/lib/safety";
 import type { Lang } from "@/lib/i18n";
 import type { NpcProfile, SimSettings, User } from "@/lib/types";
 import { BANKS, SLOTS, type Category, type Line } from "./banks";
+import { DEFAULT_SIM } from "./settings";
+
+const DEFAULT_PROMPT = DEFAULT_SIM.prompt;
 
 export type Rng = () => number;
 
@@ -88,13 +92,19 @@ export function eliasCategory(glaze: number, rng: Rng): Category {
   return rng() < clamp01((0.45 - glaze) / 0.45) * 0.8 ? "roast" : "critical";
 }
 
+/** A prompt the owner wrote themselves steers harder than the default vibe. */
+export function promptWeight(s: SimSettings, hasTopics: boolean): number {
+  if (!hasTopics) return 0;
+  return s.prompt.trim() === DEFAULT_PROMPT.trim() ? 0.3 : 0.55;
+}
+
 export function freshCategory(s: SimSettings, e: Effective, hasTopics: boolean, rng: Rng): Category {
   const bucket = weighted(
     {
-      elias: 0.42,
+      elias: 0.46,
       drama: 0.03 + e.drama * 0.37,
       wholesome: (1 - e.drama) * 0.1,
-      prompt: hasTopics ? 0.3 : 0,
+      prompt: promptWeight(s, hasTopics),
       meta: s.breakCharacter ? 0.08 : 0,
       topic: 0.36,
     },
@@ -259,6 +269,7 @@ export function composeLine(input: ComposeInput): Composed | null {
     en = finish(en);
     de = finish(de);
     if (!en || !de) continue;
+    if (!safetyCheck(en).ok || !safetyCheck(de).ok) continue; // hard filter, same as the server
     const useGerman = rng() < (input.profile?.germanRatio ?? 0.5);
     const mix = useGerman ? de : en;
     const shown = input.lang === "en" ? en : mix;

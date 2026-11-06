@@ -31,6 +31,8 @@ export interface MessageRowProps {
   onReact: (id: string, emoji: string) => void;
   onProfile: (userId: string, anchor: { x: number; y: number }) => void;
   onJumpTo: (id: string) => void;
+  onRetry: (id: string) => void;
+  onDiscard: (id: string) => void;
 }
 
 const QUICK = ["🔥", "😭", "🖤"];
@@ -125,6 +127,8 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
       data-mentioned={p.mentioned}
       data-replying={p.replying}
       data-active={p.editing}
+      data-pending={message.pending || undefined}
+      data-failed={message.failed ? true : undefined}
       id={`msg-${message.id}`}
       role="article"
       aria-label={`${author.displayName}, ${clock(message.createdAt, p.lang)}`}
@@ -177,6 +181,14 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
         <div className={`msg__content ${jumbo ? "msg__content--jumbo" : ""}`}>
           {renderMarkup(p.text, p.markup)}
           {message.editedAt && <span className="msg__edited">{p.t.edited}</span>}
+        </div>
+      )}
+
+      {message.failed && (
+        <div className="msg__failed" role="alert">
+          <span>{message.failed}</span>
+          <button onClick={() => p.onRetry(message.id)}>{p.t.retry}</button>
+          <button onClick={() => p.onDiscard(message.id)}>{p.t.discard}</button>
         </div>
       )}
 

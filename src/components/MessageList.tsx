@@ -13,12 +13,14 @@ import { MessageRow } from "./MessageRow";
 
 type Row =
   | { kind: "start"; key: string }
+  | { kind: "loader"; key: string }
   | { kind: "sep"; key: string; day: number }
   | { kind: "msg"; key: string; message: Message; groupStart: boolean };
 
-function buildRows(messages: Message[]): Row[] {
+function buildRows(messages: Message[], atStart: boolean): Row[] {
   // The channel-start block is a row (not a Virtuoso Header) so it bottom-aligns with short histories.
-  const rows: Row[] = [{ kind: "start", key: "start" }];
+  // While older history exists on the server, a loader row sits there instead.
+  const rows: Row[] = [atStart ? { kind: "start", key: "start" } : { kind: "loader", key: "loader" }];
   let prev: Message | undefined;
   let prevDay = -1;
   for (const m of messages) {
@@ -107,7 +109,26 @@ function MessageListInner({ channelId }: { channelId: string }) {
     [all, channelId, fixture],
   );
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
-  const rows = useMemo(() => buildRows(messages), [messages]);
+  const hist = useLounge((s) => s.history[channelId]);
+  const loadOlder = useLounge((s) => s.loadOlder);
+  const retrySend = useLounge((s) => s.retrySend);
+  const discardFailed = useLounge((s) => s.discardFailed);
+  const atStart = fixture || !hist?.hasMore;
+  const rows = useMemo(() => buildRows(messages, atStart), [messages, atStart]);
+  const firstSepKey = atStart ? rows.find((r) => r.kind === "sep")?.key : undefined;
+
+  // Prepending older history: shift firstItemIndex by the rows inserted above the old first message.
+  const firstIndex = useRef(1_000_000);
+  const prevFirst = useRef<{ key: string; pos: number } | null>(null);
+  useMemo(() => {
+    const pos = rows.findIndex((r) => r.kind === "msg");
+    const prev = prevFirst.current;
+    if (prev) {
+      const now = rows.findIndex((r) => r.key === prev.key);
+      if (now > prev.pos) firstIndex.current -= now - prev.pos;
+    }
+    prevFirst.current = pos >= 0 ? { key: rows[pos]!.key, pos } : null;
+  }, [rows]);
   const viewer = users[viewerId];
 
   const markup: MarkupContext = useMemo(
@@ -162,10 +183,11 @@ function MessageListInner({ channelId }: { channelId: string }) {
 
   const onRange = useCallback(
     ({ startIndex }: { startIndex: number }) => {
-      let i = Math.min(startIndex, rows.length - 1);
+      const local = startIndex >= firstIndex.current ? startIndex - firstIndex.current : startIndex;
+      let i = Math.max(0, Math.min(local, rows.length - 1));
       while (i > 0 && rows[i]?.kind !== "sep") i--;
       const r = rows[i];
-      const first = rows[startIndex];
+      const first = rows[Math.max(0, Math.min(local, rows.length - 1))];
       // Hide the floating pill when the real divider itself is at the top.
       if (!pinned.current && r?.kind === "sep" && first?.kind !== "sep") {
         setStickyDay(r.day);
@@ -209,7 +231,9 @@ function MessageListInner({ channelId }: { channelId: string }) {
         style={{ flex: 1 }}
         data={rows}
         computeItemKey={(_, r) => r.key}
+        firstItemIndex={firstIndex.current}
         initialTopMostItemIndex={rows.length - 1}
+        startReached={() => void loadOlder(channelId)}
         alignToBottom
         followOutput={(bottom) => (bottom ? "smooth" : false)}
         atBottomStateChange={(b) => {
@@ -224,11 +248,18 @@ function MessageListInner({ channelId }: { channelId: string }) {
         increaseViewportBy={{ top: 600, bottom: 300 }}
         rangeChanged={onRange}
         components={{ Footer: ListFooter }}
-        itemContent={(index, r) => {
+        itemContent={(_, r) => {
           if (r.kind === "start") return <ChannelStart />;
+          if (r.kind === "loader") {
+            return (
+              <div className="history-loader" aria-live="polite">
+                {hist?.loading ? t.loadingOlder : ""}
+              </div>
+            );
+          }
           if (r.kind === "sep") {
             return (
-              <div className={`datesep ${index === 1 ? "datesep--first" : ""}`} role="separator">
+              <div className={`datesep ${r.key === firstSepKey ? "datesep--first" : ""}`} role="separator">
                 <span>{dividerDate(r.day, lang)}</span>
               </div>
             );
@@ -261,6 +292,8 @@ function MessageListInner({ channelId }: { channelId: string }) {
               onReact={toggleReaction}
               onProfile={openProfile}
               onJumpTo={jumpTo}
+              onRetry={retrySend}
+              onDiscard={discardFailed}
             />
           );
         }}

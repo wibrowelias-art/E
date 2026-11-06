@@ -17,6 +17,7 @@ import path from "node:path";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
+import { loginOwner } from "./env.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const OUT = path.resolve("docs/screenshots");
@@ -31,10 +32,12 @@ const settle = async (page) => {
 
 async function shot(browser, name, url, viewport, dpr, prep) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: dpr, hasTouch: viewport.width < 768 });
+  await loginOwner(ctx, BASE);
   const page = await ctx.newPage();
   // Screens are captured on the static backlog (sim off, English) so they're reproducible.
   const sep = url.includes("?") ? "&" : "?";
-  await page.goto(BASE + url + (url.includes("sim=") ? "" : `${sep}sim=off&lang=en`), { waitUntil: "networkidle" });
+  // local=1: render the static backlog (the database's history changes over time)
+  await page.goto(BASE + url + (url.includes("sim=") ? "" : `${sep}sim=off&lang=en&local=1`), { waitUntil: "networkidle" });
   await settle(page);
   if (prep) await prep(page);
   const file = path.join(OUT, `${name}.current.png`);

@@ -11,6 +11,7 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
+import { loginOwner } from "./env.mjs";
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 
 let failed = 0;
@@ -37,10 +38,12 @@ function nearDupPairs(texts) {
 
 async function session(browser, settings) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await loginOwner(ctx, BASE);
   if (settings) await ctx.addInitScript((s) => localStorage.setItem("lounge.sim", JSON.stringify(s)), settings);
   const page = await ctx.newPage();
   await page.clock.install({ time: new Date("2026-11-06T21:30:00") });
-  await page.goto(`${BASE}/channels/lounge/general?debug&lang=en`, { waitUntil: "networkidle" });
+  // local=1 keeps simulator test runs out of the database
+  await page.goto(`${BASE}/channels/lounge/general?debug&lang=en&local=1`, { waitUntil: "networkidle" });
   // Advance the fake clock in small steps until the app has hydrated.
   for (let i = 0; i < 100; i++) {
     if (await page.evaluate(() => !!window.__lounge?.getState().ready)) break;

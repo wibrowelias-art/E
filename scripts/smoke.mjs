@@ -6,6 +6,7 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
+import { OWNER, loginOwner } from "./env.mjs";
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 let failed = 0;
 const ok = (cond, msg) => {
@@ -15,7 +16,20 @@ const ok = (cond, msg) => {
 
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const ownerCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await ownerCtx.newPage();
+  // Phase 2: the door — signed-out visitors land on /login, owner signs in through the form.
+  await page.goto(`${BASE}/channels/lounge/general`, { waitUntil: "networkidle" });
+  ok(new URL(page.url()).pathname === "/login", "signed out → /login");
+  await page.fill("#email", OWNER.email);
+  await page.fill("#password", "definitely-wrong");
+  await page.click(".auth__primary");
+  await page.waitForSelector(".auth__error");
+  ok(true, "wrong password shows an error");
+  await page.fill("#password", OWNER.password);
+  await page.click(".auth__primary");
+  await page.waitForURL((u) => u.pathname === "/", { timeout: 15000 });
+  ok(true, "owner signs in through the form");
   await page.goto(`${BASE}/channels/lounge/general?sim=off&lang=en`, { waitUntil: "networkidle" });
   await page.waitForSelector(".msg");
   ok(await page.locator(".skel").count() === 0, "skeleton replaced by messages after hydration");
@@ -31,6 +45,8 @@ try {
   const last = page.locator(".msg").last();
   ok((await last.innerText()).includes("first line\nsecond line"), "Enter sends, Shift+Enter keeps newline");
   ok((await input.inputValue()) === "", "composer cleared after send");
+  await page.waitForFunction(() => !document.querySelector(".msg[data-pending]"), null, { timeout: 10000 });
+  ok(true, "message confirmed by the server (pending cleared)");
 
   await input.press("ArrowUp");
   await page.waitForSelector(".editbox textarea");
@@ -43,6 +59,10 @@ try {
   await edit.press("Enter");
   await page.waitForTimeout(200);
   ok((await page.locator(".msg").last().innerText()).includes("edited text(edited)"), "edit saves with (edited) marker");
+  await page.waitForTimeout(600);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(".msg");
+  ok((await page.locator(".msg").last().innerText()).includes("edited text(edited)"), "after reload: the message and its edit are still there (persisted)");
 
   const reaction = page.locator(".reaction").first();
   const before = await reaction.innerText();
@@ -83,7 +103,42 @@ try {
   await page.keyboard.press("Escape");
   ok((await page.locator(".bs").count()) === 0, "Esc closes Backstage");
 
-  const m = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  // Guest (Tourist): read-mostly
+  const guestCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const g = await guestCtx.newPage();
+  await g.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await g.fill(".auth__guest input", "Smoke Guest");
+  await g.click(".auth__secondary");
+  await g.waitForURL((u) => u.pathname === "/", { timeout: 15000 });
+  await g.goto(`${BASE}/channels/lounge/general?sim=off&lang=en`, { waitUntil: "networkidle" });
+  await g.waitForSelector(".msg");
+  ok(await g.locator(".composer__readonly").isVisible(), "guest: #general composer is read-only");
+  ok((await g.locator('.titlebar [aria-label="Backstage"]').count()) === 0, "guest: no Backstage button");
+  ok((await g.locator(".chanrow", { hasText: "ops" }).count()) === 0, "guest: staff channels hidden");
+  await g.locator(".chanrow", { hasText: "introductions" }).first().click();
+  const gi = g.locator(".composer__input");
+  await gi.click();
+  await gi.type(`hi from the smoke test ${Date.now()}`);
+  await gi.press("Enter");
+  await g.waitForFunction(() => !document.querySelector(".msg[data-pending]") && !document.querySelector(".msg[data-failed]"), null, { timeout: 10000 });
+  ok(true, "guest: can post in #introductions");
+
+  // Shared floor: the owner's browser runs the sim, the guest receives it via the database poll.
+  const floor = await ownerCtx.newPage();
+  await floor.goto(`${BASE}/channels/lounge/general?lang=en`, { waitUntil: "networkidle" });
+  const msgsBefore = await g.evaluate(() => document.querySelectorAll(".msg").length);
+  await g.locator(".chanrow", { hasText: "general" }).first().click();
+  let synced = false;
+  for (let i = 0; i < 20 && !synced; i++) {
+    await g.waitForTimeout(1000);
+    synced = (await g.locator('[id^="msg-m_sim_"]').count()) > 0;
+  }
+  ok(synced, `guest receives NPC messages from the owner's floor via the server (had ${msgsBefore} messages)`);
+  await floor.close();
+
+  const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  await loginOwner(mctx, BASE);
+  const m = await mctx.newPage();
   await m.goto(`${BASE}/?sim=off&lang=en`, { waitUntil: "networkidle" });
   await m.waitForSelector(".msg");
   ok((await m.locator(".app").getAttribute("data-pane")) === "channels", "mobile opens on channel list");

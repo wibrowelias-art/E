@@ -1,3 +1,4 @@
+import { safetyCheck } from "@/lib/safety";
 import type { Message, User } from "@/lib/types";
 import { GUILDS } from "./guilds";
 import { buildBacklog, SEED_MESSAGES } from "./messages";
@@ -81,6 +82,10 @@ export function validateBanks(banks: Record<string, Array<{ en: string; de: stri
       const slotsDe = [...l.de.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join();
       if (slotsEn !== slotsDe) errors.push(`${cat}[${i}]: slots differ between en and de`);
       if (looksGerman(l.en.replace(/\{\w+\}/g, ""))) errors.push(`${cat}[${i}]: German in English line "${l.en}"`);
+      for (const side of [l.en, l.de]) {
+        const filled = side.replace(/\{(\w+)\}/g, (_, k: string) => slots[k]?.en[0] ?? "Mara");
+        if (!safetyCheck(filled).ok) errors.push(`${cat}[${i}]: trips the safety filter "${filled}"`);
+      }
     });
   }
   return errors;

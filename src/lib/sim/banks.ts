@@ -64,7 +64,8 @@ export type Category =
   | "ownerNeg"
   | "ownerNeutral"
   | "prompt"
-  | "meta";
+  | "meta"
+  | "greet";
 
 export const BANKS: Record<Category, Line[]> = {
   worship: [
@@ -267,6 +268,14 @@ export const BANKS: Record<Category, Line[]> = {
     L("does elias know about {topic} yet", "weiß elias schon von {topic}"),
     L("unpopular opinion about {topic} incoming", "unpopular opinion zu {topic} kommt gleich"),
     L("{topic} {time}? i'm in", "{topic} {time}? bin dabei"),
+  ],
+  greet: [
+    L("welcome {name} 👋", "willkommen {name} 👋"),
+    L("{name} welcome to the floor!", "{name} willkommen auf dem floor!"),
+    L("hey {name}, good to have you here", "hey {name}, schön dass du da bist"),
+    L("welcome in! #hamburg-night has the plans for tonight", "willkommen! in #hamburg-night stehen die pläne für heute"),
+    L("{name} make yourself at home, the drinks are imaginary but the vibes are real", "{name} fühl dich wie zuhause, die drinks sind ausgedacht aber der vibe ist echt"),
+    L("ooh new face. hi {name}", "oh, neues gesicht. hi {name}"),
   ],
   meta: [
     L("sometimes it feels like we're all running on the same server lol", "manchmal fühlt es sich an als würden wir alle auf demselben server laufen lol"),
