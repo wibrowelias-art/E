@@ -1,4 +1,4 @@
-import type { Client, InStatement, Row } from "@libsql/client";
+import type { Db, InStatement, Row } from "./sql";
 import { randomBytes } from "node:crypto";
 import { GUILDS } from "@/data/guilds";
 import { safetyCheck, SAFETY_MESSAGE } from "@/lib/safety";
@@ -64,7 +64,7 @@ function rowToMessage(r: Row, reactions: Map<string, Reaction[]>): Message {
   };
 }
 
-async function reactionsFor(c: Client, ids: string[], viewerId: string): Promise<Map<string, Reaction[]>> {
+async function reactionsFor(c: Db, ids: string[], viewerId: string): Promise<Map<string, Reaction[]>> {
   const out = new Map<string, Reaction[]>();
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
@@ -74,7 +74,7 @@ async function reactionsFor(c: Client, ids: string[], viewerId: string): Promise
       sql: `SELECT r.message_id, r.emoji, r.npc_count,
               (SELECT COUNT(*) FROM reaction_users u WHERE u.message_id = r.message_id AND u.emoji = r.emoji) AS humans,
               (SELECT COUNT(*) FROM reaction_users u WHERE u.message_id = r.message_id AND u.emoji = r.emoji AND u.user_id = ?) AS mine
-            FROM reactions r WHERE r.message_id IN (${q}) ORDER BY r.rowid`,
+            FROM reactions r WHERE r.message_id IN (${q}) ORDER BY r.created_at, r.emoji`,
       args: [viewerId, ...chunk],
     });
     for (const row of res.rows) {
@@ -88,31 +88,31 @@ async function reactionsFor(c: Client, ids: string[], viewerId: string): Promise
   return out;
 }
 
-async function currentRev(c: Client): Promise<number> {
+async function currentRev(c: Db): Promise<number> {
   const r = await c.execute("SELECT value FROM meta WHERE key = 'rev'");
   return Number(r.rows[0]?.value ?? 0);
 }
 
 /* ───────── reads ───────── */
 
-export async function ensureGuest(c: Client, s: Session) {
+export async function ensureGuest(c: Db, s: Session) {
   if (s.role !== "tourist") return;
   const [from, to] = s.grad ?? ["#5ee7df", "#4a6cf7"];
   await c.batch(
     [
       BUMP_REV,
       {
-        sql: `INSERT OR IGNORE INTO users (id, username, display_name, avatar_from, avatar_to, initials, role_id, is_npc, is_bot, is_human, presence, created_at, rev)
-              VALUES (?,?,?,?,?,?, 'tourist', 0, 0, 1, 'online', ?, ${CURRENT_REV})`,
+        sql: `INSERT INTO users (id, username, display_name, avatar_from, avatar_to, initials, role_id, is_npc, is_bot, is_human, presence, created_at, rev)
+              VALUES (?,?,?,?,?,?, 'tourist', 0, 0, 1, 'online', ?, ${CURRENT_REV}) ON CONFLICT DO NOTHING`,
         args: [s.uid, s.name.toLowerCase().replace(/\s+/g, "."), s.name, from, to, s.name.slice(0, 1).toUpperCase(), Date.now()],
       },
-      { sql: "INSERT OR IGNORE INTO memberships VALUES ('g_lounge', ?, 'tourist')", args: [s.uid] },
+      { sql: "INSERT INTO memberships (guild_id, user_id, role_id) VALUES ('g_lounge', ?, 'tourist') ON CONFLICT DO NOTHING", args: [s.uid] },
     ],
     "write",
   );
 }
 
-async function typingNow(c: Client, visible: string[], now: number) {
+async function typingNow(c: Db, visible: string[], now: number) {
   const q = visible.map(() => "?").join(",");
   const r = await c.execute({
     sql: `SELECT DISTINCT channel_id, author_id FROM messages
@@ -122,7 +122,7 @@ async function typingNow(c: Client, visible: string[], now: number) {
   return r.rows.map((row) => ({ channelId: String(row.channel_id), userId: String(row.author_id) }));
 }
 
-export async function bootstrap(c: Client, s: Session) {
+export async function bootstrap(c: Db, s: Session) {
   await ensureGuest(c, s);
   const visible = visibleChannelIds(s);
   const q = visible.map(() => "?").join(",");
@@ -133,7 +133,7 @@ export async function bootstrap(c: Client, s: Session) {
       sql: `SELECT * FROM (
               SELECT m.*, ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY created_at DESC) AS rn
               FROM messages m WHERE channel_id IN (${q}) AND created_at <= ?
-            ) WHERE rn <= ${HISTORY_PER_CHANNEL} ORDER BY created_at ASC`,
+            ) AS t WHERE rn <= ${HISTORY_PER_CHANNEL} ORDER BY created_at ASC`,
       args: [...visible, now],
     }),
     s.role === "owner" ? getSim(c) : Promise.resolve(null),
@@ -151,7 +151,7 @@ export async function bootstrap(c: Client, s: Session) {
   };
 }
 
-export async function history(c: Client, s: Session, channelId: string, before: number, limit = 80) {
+export async function history(c: Db, s: Session, channelId: string, before: number, limit = 80) {
   if (!visibleChannelIds(s).includes(channelId)) throw new ApiError(403, "No access to this channel");
   const res = await c.execute({
     sql: "SELECT * FROM messages WHERE channel_id = ? AND created_at < ? AND created_at <= ? ORDER BY created_at DESC LIMIT ?",
@@ -167,7 +167,7 @@ export async function history(c: Client, s: Session, channelId: string, before: 
  * `after` (server time of the previous poll) catches scheduled floor messages
  * that were written earlier but only became visible now.
  */
-export async function poll(c: Client, s: Session, since: number, after: number) {
+export async function poll(c: Db, s: Session, since: number, after: number) {
   const visible = visibleChannelIds(s);
   const q = visible.map(() => "?").join(",");
   const now = Date.now();
@@ -206,7 +206,7 @@ export async function poll(c: Client, s: Session, since: number, after: number) 
   };
 }
 
-async function getMessage(c: Client, id: string, viewerId: string): Promise<Message | null> {
+async function getMessage(c: Db, id: string, viewerId: string): Promise<Message | null> {
   const r = await c.execute({ sql: "SELECT * FROM messages WHERE id = ?", args: [id] });
   const row = r.rows[0];
   if (!row) return null;
@@ -236,7 +236,7 @@ function cleanText(raw: unknown): string {
   return text;
 }
 
-export async function postHuman(c: Client, s: Session, body: { channelId?: unknown; content?: unknown; replyToId?: unknown; clientId?: unknown }) {
+export async function postHuman(c: Db, s: Session, body: { channelId?: unknown; content?: unknown; replyToId?: unknown; clientId?: unknown }) {
   const channelId = String(body.channelId ?? "");
   if (!canPost(s, channelId)) {
     throw new ApiError(403, s.role === "tourist" ? "Guests can post in #introductions. Everything else is read-only for you." : "You can't post in this channel.");
@@ -266,7 +266,7 @@ export async function postHuman(c: Client, s: Session, body: { channelId?: unkno
   return message;
 }
 
-export async function editHuman(c: Client, s: Session, id: string, raw: unknown) {
+export async function editHuman(c: Db, s: Session, id: string, raw: unknown) {
   const content = cleanText(raw);
   const r = await c.execute({ sql: "SELECT author_id FROM messages WHERE id = ?", args: [id] });
   if (!r.rows[0]) throw new ApiError(404, "Message not found.");
@@ -280,7 +280,7 @@ export async function editHuman(c: Client, s: Session, id: string, raw: unknown)
 
 const EMOJI_OK = /^[\p{Extended_Pictographic}\p{Emoji_Component}‍️]{1,16}$/u;
 
-export async function toggleHumanReaction(c: Client, s: Session, id: string, emoji: unknown) {
+export async function toggleHumanReaction(c: Db, s: Session, id: string, emoji: unknown) {
   if (typeof emoji !== "string" || !EMOJI_OK.test(emoji)) throw new ApiError(400, "Not an emoji.");
   const m = await c.execute({ sql: "SELECT channel_id FROM messages WHERE id = ?", args: [id] });
   if (!m.rows[0]) throw new ApiError(404, "Message not found.");
@@ -291,8 +291,8 @@ export async function toggleHumanReaction(c: Client, s: Session, id: string, emo
   if (has.rows.length) {
     stmts.push({ sql: "DELETE FROM reaction_users WHERE message_id = ? AND emoji = ? AND user_id = ?", args: [id, emoji, s.uid] });
   } else {
-    stmts.push({ sql: "INSERT OR IGNORE INTO reactions (message_id, emoji, npc_count) VALUES (?,?,0)", args: [id, emoji] });
-    stmts.push({ sql: "INSERT INTO reaction_users VALUES (?,?,?)", args: [id, emoji, s.uid] });
+    stmts.push({ sql: "INSERT INTO reactions (message_id, emoji, npc_count, created_at) VALUES (?,?,0,?) ON CONFLICT DO NOTHING", args: [id, emoji, Date.now()] });
+    stmts.push({ sql: "INSERT INTO reaction_users (message_id, emoji, user_id) VALUES (?,?,?)", args: [id, emoji, s.uid] });
   }
   stmts.push({ sql: `UPDATE messages SET rev = ${CURRENT_REV} WHERE id = ?`, args: [id] });
   await c.batch(stmts, "write");
@@ -301,13 +301,13 @@ export async function toggleHumanReaction(c: Client, s: Session, id: string, emo
 
 /* ───────── Backstage settings ───────── */
 
-export async function getSim(c: Client): Promise<SimSettings> {
+export async function getSim(c: Db): Promise<SimSettings> {
   const r = await c.execute("SELECT settings_json FROM sim_state WHERE id = 1");
   const raw = r.rows[0]?.settings_json;
   return raw ? clampSettings(JSON.parse(String(raw))) : { ...DEFAULT_SIM };
 }
 
-export async function putSim(c: Client, s: Session, body: unknown): Promise<SimSettings> {
+export async function putSim(c: Db, s: Session, body: unknown): Promise<SimSettings> {
   if (s.role !== "owner") throw new ApiError(403, "Backstage is owner-only.");
   const before = await getSim(c);
   const settings = clampSettings({ ...before, ...(body as Partial<SimSettings>) });

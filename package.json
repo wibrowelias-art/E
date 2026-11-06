@@ -21,6 +21,7 @@
     "@fontsource-variable/figtree": "^5.2.0",
     "@libsql/client": "^0.18.0",
     "next": "15.5.29",
+    "pg": "^8.23.1",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "react-virtuoso": "^4.18.0",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "tailwindcss": "^4.1.0",

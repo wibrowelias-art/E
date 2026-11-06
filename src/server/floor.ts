@@ -6,7 +6,7 @@
  * long-running server (`pnpm start`, Docker) the ticker in
  * src/instrumentation.ts also ticks every few seconds on its own.
  */
-import type { Client, InStatement, Row } from "@libsql/client";
+import type { Db, InStatement, Row } from "./sql";
 import { randomBytes } from "node:crypto";
 import { BOT_ID } from "@/data/npcs";
 import { safetyCheck } from "@/lib/safety";
@@ -46,14 +46,14 @@ function rowToMessageLite(r: Row): Message {
   };
 }
 
-export async function loadWorld(c: Client, now: number): Promise<Loaded> {
+export async function loadWorld(c: Db, now: number): Promise<Loaded> {
   const q = FLOOR_CHANNELS.map(() => "?").join(",");
   const [sim, users, recent, keys, human] = await Promise.all([
     c.execute("SELECT settings_json, state_json, last_planned_at FROM sim_state WHERE id = 1"),
     c.execute("SELECT * FROM users"),
     c.execute({
       sql: `SELECT * FROM (SELECT m.*, ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY created_at DESC) AS rn
-            FROM messages m WHERE channel_id IN (${q})) WHERE rn <= 60 ORDER BY created_at ASC`,
+            FROM messages m WHERE channel_id IN (${q})) AS t WHERE rn <= 60 ORDER BY created_at ASC`,
       args: FLOOR_CHANNELS,
     }),
     c.execute("SELECT content, content_en FROM messages ORDER BY created_at DESC LIMIT 100"),
@@ -89,8 +89,15 @@ export async function loadWorld(c: Client, now: number): Promise<Loaded> {
   };
 }
 
+/** SQL that is true when Backstage paused the floor or muted the author bound to `?`. */
+function pausedOrMuted(dialect: Db["dialect"]): string {
+  return dialect === "pg"
+    ? `(settings_json::jsonb ->> 'paused')::boolean IS TRUE OR (settings_json::jsonb -> 'muted') @> to_jsonb(CAST(? AS TEXT))`
+    : `json_extract(settings_json, '$.paused') = 1 OR EXISTS (SELECT 1 FROM json_each(settings_json, '$.muted') WHERE value = ?)`;
+}
+
 /** Persist planner events: messages (scheduled with typing), reactions, presence / voice. */
-export function eventStatements(events: FloorEvent[]): InStatement[] {
+export function eventStatements(events: FloorEvent[], dialect: Db["dialect"]): InStatement[] {
   const stmts: InStatement[] = [BUMP_REV];
   for (const e of events) {
     if (e.kind === "message") {
@@ -100,25 +107,26 @@ export function eventStatements(events: FloorEvent[]): InStatement[] {
       // Guarded in the same transaction: if Backstage paused the floor or muted this NPC
       // after we planned, the line is dropped instead of slipping through.
       stmts.push({
-        sql: `INSERT OR IGNORE INTO messages (id, channel_id, author_id, content, content_en, content_de, created_at, reply_to_id, is_human, sim_tag, typing_ms, rev)
-              SELECT ?,?,?,?,?,?,?,?,0,?,?,${CURRENT_REV}
-              WHERE NOT EXISTS (
-                SELECT 1 FROM sim_state WHERE id = 1 AND (
-                  json_extract(settings_json, '$.paused') = 1 OR
-                  EXISTS (SELECT 1 FROM json_each(settings_json, '$.muted') WHERE value = ?)))`,
+        sql: `INSERT INTO messages (id, channel_id, author_id, content, content_en, content_de, created_at, reply_to_id, is_human, sim_tag, typing_ms, rev)
+              SELECT CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT), CAST(? AS TEXT),
+                     CAST(? AS BIGINT), CAST(? AS TEXT), 0, CAST(? AS TEXT), CAST(? AS BIGINT), ${CURRENT_REV}
+              WHERE NOT EXISTS (SELECT 1 FROM sim_state WHERE id = 1 AND (${pausedOrMuted(dialect)}))
+              ON CONFLICT DO NOTHING`,
         args: [m.id, m.channelId, m.authorId, m.content, m.i18n?.en ?? null, m.i18n?.de ?? null, m.createdAt, m.replyToId ?? null, m.simTag ?? null, e.typingMs, m.authorId],
       });
     } else if (e.kind === "reaction") {
       stmts.push({
-        sql: "INSERT INTO reactions (message_id, emoji, npc_count) SELECT ?, ?, 1 WHERE EXISTS (SELECT 1 FROM messages WHERE id = ?) ON CONFLICT(message_id, emoji) DO UPDATE SET npc_count = npc_count + 1",
-        args: [e.messageId, e.emoji, e.messageId],
+        sql: `INSERT INTO reactions (message_id, emoji, npc_count, created_at)
+              SELECT CAST(? AS TEXT), CAST(? AS TEXT), 1, CAST(? AS BIGINT) WHERE EXISTS (SELECT 1 FROM messages WHERE id = ?)
+              ON CONFLICT (message_id, emoji) DO UPDATE SET npc_count = reactions.npc_count + 1`,
+        args: [e.messageId, e.emoji, Math.round(e.at), e.messageId],
       });
       stmts.push({ sql: `UPDATE messages SET rev = ${CURRENT_REV} WHERE id = ?`, args: [e.messageId] });
     } else {
       const p = e.patch;
       stmts.push({
         sql: `UPDATE users SET presence = COALESCE(?, presence),
-                voice_channel_id = CASE WHEN ? THEN ? ELSE voice_channel_id END,
+                voice_channel_id = CASE WHEN ? = 1 THEN ? ELSE voice_channel_id END,
                 speaking = COALESCE(?, speaking), rev = ${CURRENT_REV}
               WHERE id = ? AND is_npc = 1`,
         args: [
@@ -162,7 +170,7 @@ let lastLocalCheck = 0;
  * Advance the floor if it's due. Safe to call from every request: a cheap
  * read decides, and a lease row makes sure only one instance plans at a time.
  */
-export async function tick(c: Client, opts: { force?: boolean; now?: number } = {}): Promise<TickResult> {
+export async function tick(c: Db, opts: { force?: boolean; now?: number } = {}): Promise<TickResult> {
   const now = opts.now ?? Date.now();
   const idle: TickResult = { ran: false, messages: 0, caughtUp: 0, gapMs: 0 };
   if (!opts.force) {
@@ -207,7 +215,7 @@ export async function tick(c: Client, opts: { force?: boolean; now?: number } = 
       state.nextStepAt = Math.min(state.nextStepAt, until);
     }
     planner.advance(Math.max(start, now - LIVE_WINDOW_MS), now + LOOKAHEAD_MS);
-    const stmts = eventStatements(planner.events);
+    const stmts = eventStatements(planner.events, c.dialect);
     if (caughtUp > 0) {
       stmts.push(
         doormanLine(
@@ -230,7 +238,7 @@ export async function tick(c: Client, opts: { force?: boolean; now?: number } = 
 }
 
 /** Never let a floor hiccup break a user request. */
-export async function maybeTick(c: Client) {
+export async function maybeTick(c: Db) {
   try {
     await tick(c);
   } catch (e) {
@@ -239,7 +247,7 @@ export async function maybeTick(c: Client) {
 }
 
 /** A human posted → schedule NPC answers (owner: 1–3 replies; guest: a welcome). */
-export async function scheduleReplies(c: Client, human: Message) {
+export async function scheduleReplies(c: Db, human: Message) {
   try {
     const now = Date.now();
     const { world, state } = await loadWorld(c, now);
@@ -247,19 +255,19 @@ export async function scheduleReplies(c: Client, human: Message) {
     world.recent.get(human.channelId)?.push(human) ?? world.recent.set(human.channelId, [human]);
     const planner = new Planner(world, state);
     planner.replyToHuman(human, now);
-    await c.batch(eventStatements(planner.events), "write");
+    await c.batch(eventStatements(planner.events, c.dialect), "write");
   } catch (e) {
     console.error("[lounge] scheduling replies failed", e);
   }
 }
 
 /** Backstage "Start a burst" — six messages in one channel over the next seconds. */
-export async function burst(c: Client, channelId: string): Promise<number> {
+export async function burst(c: Db, channelId: string): Promise<number> {
   const now = Date.now();
   const { world, state } = await loadWorld(c, now);
   const planner = new Planner(world, state);
   planner.burst(channelId, now);
-  await c.batch(eventStatements(planner.events), "write");
+  await c.batch(eventStatements(planner.events, c.dialect), "write");
   return planner.events.filter((e) => e.kind === "message").length;
 }
 

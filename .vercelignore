@@ -1,0 +1,10 @@
+node_modules
+.next
+data
+dist
+.env
+.env.local
+.env*.local
+docs/screenshots
+docs/reference
+.vercel

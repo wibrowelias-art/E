@@ -1,4 +1,4 @@
-import type { Row } from "@libsql/client";
+import type { Row } from "./sql";
 import type { User } from "@/lib/types";
 
 const str = (v: unknown) => (v === null || v === undefined ? undefined : String(v));
