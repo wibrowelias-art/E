@@ -6,6 +6,7 @@ import { clampSettings, DEFAULT_SIM } from "@/lib/sim/settings";
 import type { Attachment, Message, Reaction, SimSettings } from "@/lib/types";
 import type { Session } from "./auth";
 import { BUMP_REV, CURRENT_REV } from "./db";
+import { defer } from "./defer";
 import { backstageLog, LOOKAHEAD_MS, scheduleReplies } from "./floor";
 import { rowToUser } from "./rows";
 
@@ -262,7 +263,11 @@ export async function postHuman(c: Db, s: Session, body: { channelId?: unknown; 
     "write",
   );
   const message = await getMessage(c, id, s.uid);
-  if (message) await scheduleReplies(c, message); // NPCs answer — even if nobody's browser is open
+  if (message) {
+    // NPCs answer — even if nobody's browser is open. Live (AI) rewrites run after the response.
+    const live = await scheduleReplies(c, message);
+    if (live) defer(live);
+  }
   return message;
 }
 

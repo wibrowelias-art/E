@@ -49,6 +49,14 @@ interface BootResponse {
   rev?: number;
   serverNow?: number;
   typing?: TypingEntry[];
+  ai?: AiStatus;
+}
+
+/** Server AI status (owner only): live replies need a key on the server. */
+export interface AiStatus {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
 }
 
 export interface TypingEntry {
@@ -70,6 +78,7 @@ interface LoungeState {
   /** true = messages live in the database (Phase 2); false = local in-browser mode */
   persistence: boolean;
   persistenceNote: string | null;
+  ai: AiStatus | null;
   rev: number;
   /** Server time of the last poll (second cursor for scheduled floor messages). */
   serverNow: number;
@@ -151,6 +160,7 @@ export const useLounge = create<LoungeState>((set, get) => ({
   role: "owner",
   persistence: false,
   persistenceNote: null,
+  ai: null,
   rev: 0,
   serverNow: 0,
   history: {},
@@ -189,7 +199,7 @@ export const useLounge = create<LoungeState>((set, get) => ({
       get().showToast(e instanceof ApiFailure ? e.message : "Couldn't reach the server — local mode.");
       return;
     }
-    set({ viewerId: res.viewer.id, role: res.role });
+    set({ viewerId: res.viewer.id, role: res.role, ai: res.ai ?? null });
     if (!res.persistence || forceLocal) {
       set({
         persistence: false,

@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS sim_state (
   id BIGINT PRIMARY KEY CHECK (id = 1), settings_json TEXT NOT NULL, updated_at BIGINT NOT NULL,
   state_json TEXT, last_planned_at BIGINT, last_tick_at BIGINT, lease_id TEXT, lease_until BIGINT
 );
+CREATE TABLE IF NOT EXISTS ai_usage (minute BIGINT PRIMARY KEY, calls BIGINT NOT NULL);
 INSERT INTO meta (key, value) VALUES ('rev', 1) ON CONFLICT DO NOTHING;
 `;
 
@@ -220,6 +221,6 @@ export async function resetDatabase(c: Db) {
   await c.executeMultiple(`
     DELETE FROM reaction_users; DELETE FROM reactions; DELETE FROM messages; DELETE FROM relationships;
     DELETE FROM npc_profiles; DELETE FROM memberships; DELETE FROM channels; DELETE FROM categories;
-    DELETE FROM guilds; DELETE FROM users; DELETE FROM sim_state;`);
+    DELETE FROM guilds; DELETE FROM users; DELETE FROM sim_state; DELETE FROM ai_usage;`);
   await seed(c, Date.now());
 }

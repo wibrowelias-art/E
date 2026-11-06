@@ -8,11 +8,13 @@
  */
 import type { Db, InStatement, Row } from "./sql";
 import { randomBytes } from "node:crypto";
-import { BOT_ID } from "@/data/npcs";
+import { GUILDS } from "@/data/guilds";
+import { BOT_ID, NPC_PROFILES } from "@/data/npcs";
 import { safetyCheck } from "@/lib/safety";
 import { expectedMessages, initialPlannerState, Planner, SIM_CHANNEL_WEIGHTS, type FloorEvent, type PlannerState, type World } from "@/lib/sim/planner";
 import { clampSettings, DEFAULT_SIM } from "@/lib/sim/settings";
 import type { Message, SimSettings, User } from "@/lib/types";
+import { AI_TIMEOUT_MS, aiConfigured, liveReply, takeAiSlot } from "./ai";
 import { BUMP_REV, CURRENT_REV } from "./db";
 import { rowToUser } from "./repo";
 
@@ -246,19 +248,113 @@ export async function maybeTick(c: Db) {
   }
 }
 
-/** A human posted → schedule NPC answers (owner: 1–3 replies; guest: a welcome). */
-export async function scheduleReplies(c: Db, human: Message) {
+/** How long a live (AI) answer may take: the scheduled line is held at least this long. */
+const AI_HOLD_MS = AI_TIMEOUT_MS + 1_500;
+const CHANNEL_NAMES = new Map(GUILDS.flatMap((g) => g.channels).map((ch) => [ch.id, ch.name]));
+const PROFILES = new Map(NPC_PROFILES.map((p) => [p.userId, p]));
+
+type MessageEvent = Extract<FloorEvent, { kind: "message" }>;
+
+/**
+ * A human posted → schedule NPC answers (owner: 1–3 replies; guest: a welcome).
+ * The built-in lines are written right away, so someone always answers. With
+ * live replies on (Backstage + ANTHROPIC_API_KEY), the direct answers are held
+ * a few seconds longer ("typing…") and the returned task rewrites them with the
+ * model while they're still invisible; run it after the response is sent.
+ */
+export async function scheduleReplies(c: Db, human: Message): Promise<(() => Promise<void>) | null> {
   try {
     const now = Date.now();
     const { world, state } = await loadWorld(c, now);
-    if (world.settings.paused) return;
-    world.recent.get(human.channelId)?.push(human) ?? world.recent.set(human.channelId, [human]);
+    if (world.settings.paused) return null;
+    const channel = world.recent.get(human.channelId) ?? [];
+    world.recent.set(human.channelId, channel);
+    const before = channel.filter((m) => m.createdAt <= now && m.id !== human.id);
+    channel.push(human);
     const planner = new Planner(world, state);
     planner.replyToHuman(human, now);
-    await c.batch(eventStatements(planner.events, c.dialect), "write");
+    const events = planner.events;
+    const live = world.settings.liveReplies && aiConfigured();
+    const author = world.users.get(human.authorId);
+    const max = author?.roleId === "owner" ? 2 : 1;
+    const targets = live
+      ? events.filter((e): e is MessageEvent => e.kind === "message" && e.message.replyToId === human.id).slice(0, max)
+      : [];
+    const planned = new Map(targets.map((t) => [t, t.message.createdAt]));
+    if (targets.length) holdForLiveReplies(events, targets[0]!, now);
+    await c.batch(eventStatements(events, c.dialect), "write");
+    if (!targets.length) return null;
+    const name = (id: string) => world.users.get(id)?.displayName ?? "someone";
+    const recent = before.slice(-14).map((m) => ({ name: name(m.authorId), text: m.i18n?.en ?? m.content }));
+    const to = { name: name(human.authorId), text: human.content, isOwner: author?.roleId === "owner" };
+    return async () => {
+      await Promise.all(
+        targets.map((t, i) =>
+          writeLiveReply(c, world, t, planned.get(t)!, { recent, to, second: i > 0 }).catch((e) => console.error("[lounge] live reply write failed", e)),
+        ),
+      );
+    };
   } catch (e) {
     console.error("[lounge] scheduling replies failed", e);
+    return null;
   }
+}
+
+/** Push the first direct answer (and everything after it) back so the model has time; typing starts as planned. */
+function holdForLiveReplies(events: FloorEvent[], first: MessageEvent, now: number) {
+  const from = first.message.createdAt;
+  const delta = Math.max(0, now + AI_HOLD_MS - from);
+  if (!delta) return;
+  for (const e of events) {
+    if (e.kind !== "message" || e.message.createdAt < from) continue;
+    e.message.createdAt += delta;
+    if (e === first) e.typingMs += delta;
+  }
+}
+
+async function writeLiveReply(
+  c: Db,
+  world: World,
+  target: MessageEvent,
+  plannedAt: number,
+  ctx: { recent: Array<{ name: string; text: string }>; to: { name: string; text: string; isOwner: boolean }; second: boolean },
+) {
+  const m = target.message;
+  const npc = world.users.get(m.authorId);
+  const reply =
+    npc && (await takeAiSlot(c))
+      ? await liveReply({
+          npc,
+          profile: PROFILES.get(npc.id),
+          channelName: CHANNEL_NAMES.get(m.channelId) ?? "general",
+          recent: ctx.recent,
+          to: ctx.to,
+          settings: world.settings,
+          second: ctx.second,
+        })
+      : null;
+  const typingStart = m.createdAt - target.typingMs;
+  if (!npc || !reply) {
+    // Keep the built-in line, but don't hold it back any longer than it was planned.
+    const at = Date.now();
+    const createdAt = Math.round(Math.max(at + 400, plannedAt));
+    if (createdAt >= m.createdAt) return;
+    await c.execute({
+      sql: "UPDATE messages SET created_at = ?, typing_ms = ? WHERE id = ? AND is_human = 0 AND created_at > ?",
+      args: [createdAt, Math.max(0, createdAt - typingStart), m.id, at + 250],
+    });
+    return;
+  }
+  const german = Math.random() < (PROFILES.get(npc.id)?.germanRatio ?? 0);
+  const mix = german ? reply.de : reply.en;
+  const at = Date.now();
+  const natural = Math.round(Math.min(3000, Math.max(500, 350 + mix.length * 28)) / Math.sqrt(Math.max(0.5, world.settings.activity)));
+  const createdAt = Math.round(Math.min(m.createdAt, Math.max(at + 400, typingStart + natural)));
+  // Only while it's still invisible; if it already went out (or Backstage removed it), the built-in line stands.
+  await c.execute({
+    sql: "UPDATE messages SET content = ?, content_en = ?, content_de = ?, created_at = ?, typing_ms = ? WHERE id = ? AND is_human = 0 AND created_at > ?",
+    args: [mix, reply.en, mix, createdAt, Math.max(0, createdAt - typingStart), m.id, at + 250],
+  });
 }
 
 /** Backstage "Start a burst" — six messages in one channel over the next seconds. */

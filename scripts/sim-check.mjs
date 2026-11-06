@@ -60,7 +60,7 @@ async function session(browser, settings) {
   return { page, ctx, sim };
 }
 
-const DEFAULT = { activity: 1, glaze: 65, drama: 20, prompt: "Talk about plans for tonight, film photos, music, food and Elias' latest drops. Be friendly, a little teasing, specific with compliments.", liveReplies: false, breakCharacter: false, paused: false };
+const DEFAULT = { activity: 1, glaze: 65, drama: 20, prompt: "Talk about plans for tonight, film photos, music, food and Elias' latest drops. Be friendly, a little teasing, specific with compliments.", liveReplies: true, breakCharacter: false, paused: false };
 
 const browser = await chromium.launch();
 try {

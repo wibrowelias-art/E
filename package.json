@@ -15,9 +15,11 @@
     "db:reset": "tsx --env-file-if-exists=.env.local scripts/db.ts reset",
     "db:status": "tsx --env-file-if-exists=.env.local scripts/db.ts status",
     "api:check": "node scripts/api-check.mjs",
-    "floor:check": "tsx scripts/floor-check.ts"
+    "floor:check": "tsx scripts/floor-check.ts",
+    "ai:check": "node scripts/ai-check.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@fontsource-variable/figtree": "^5.2.0",
     "@libsql/client": "^0.18.0",
     "next": "15.5.29",

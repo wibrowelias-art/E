@@ -7,7 +7,8 @@ export const DEFAULT_SIM: SimSettings = {
   drama: 20,
   prompt:
     "Talk about plans for tonight, film photos, music, food and Elias' latest drops. Be friendly, a little teasing, specific with compliments.",
-  liveReplies: false,
+  // On by default: takes effect as soon as the server has an AI key (Phase 4).
+  liveReplies: true,
   breakCharacter: false,
   paused: false,
   muted: [],
@@ -72,7 +73,7 @@ export function clampSettings(s: Partial<SimSettings>): SimSettings {
     glaze: n(s.glaze, 0, 100, DEFAULT_SIM.glaze),
     drama: n(s.drama, 0, 100, DEFAULT_SIM.drama),
     prompt: typeof s.prompt === "string" ? s.prompt.slice(0, 600) : DEFAULT_SIM.prompt,
-    liveReplies: !!s.liveReplies,
+    liveReplies: s.liveReplies === undefined ? DEFAULT_SIM.liveReplies : !!s.liveReplies,
     breakCharacter: !!s.breakCharacter,
     paused: !!s.paused,
     muted: Array.isArray(s.muted) ? s.muted.filter((id): id is string => typeof id === "string" && /^u_[a-z0-9_]+$/.test(id)).slice(0, 40) : [],

@@ -6,12 +6,12 @@ A dark, Discord-class community app for **GOD // THE LOUNGE** — a Hamburg serv
 that should feel packed and alive the moment you open it. Original name, logo,
 icons and content; no Discord assets, fonts or trademarks.
 
-> **Status: Phases 0–3 done.** UI matched to the reference screenshots,
-> English/Deutsch, **Backstage**, persistence + login, and now the **always-on server
-> floor**: the server plans the NPCs (messages, typing, reactions, voice, presence) and
-> stores them, so the room keeps moving with nobody online and everyone sees the same
-> typing indicators. Coming back after hours fills in the missed history. Next: live AI
-> providers (Phase 4). See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status: Phases 0–4 done, live at <https://the-lounge-hamburg.vercel.app>** (Vercel,
+> Frankfurt, Neon Postgres). UI matched to the reference screenshots, English/Deutsch,
+> **Backstage**, persistence + login, the **always-on server floor** (the server plans the
+> NPCs — messages, typing, reactions, voice, presence — so the room keeps moving with
+> nobody online), and **optional live replies with Claude**: add `ANTHROPIC_API_KEY` and
+> redeploy, no code changes. See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Run
 
@@ -35,6 +35,7 @@ with the guilds, the 32 NPCs and the backlog. `pnpm db:reset` wipes and re-seeds
 | `pnpm smoke` | Browser checks: login form, send → reload → still there, ↑ edit, Esc, reactions, language switch, Backstage, guest read-only, owner floor reaching a guest through the database, mobile navigation |
 | `pnpm floor:check` | Server floor planner, in memory with a simulated clock: cold open, 5-minute volume, duplicates, Elias share, replies, every Backstage control, mute, 6-hour catch-up, time of day, replies to humans, bursts |
 | `pnpm sim:check` | Simulator acceptance tests with a fake clock (cold open, 5-minute volume, duplicates, Elias share, every Backstage control) |
+| `pnpm ai:check` | Live replies end to end against a local mock of the Anthropic API (no key, no cost): request shape, a live reply replacing the built-in line, and refusal / 500 / timeout / unsafe / out-of-character output all falling back to the built-in line on time. Start the app with `ANTHROPIC_API_KEY=test ANTHROPIC_BASE_URL=http://127.0.0.1:4599` first |
 
 URLs: `/` (mobile opens on the channel list), `/channels/lounge/<channel>`,
 `/channels/lab/roadmap`, `/channels/darkroom/darkroom`.
@@ -48,19 +49,25 @@ list / chat with the same row structure as the reference screenshots.
 
 ## Deploy on Vercel
 
-1. **Database (for persistence):** create a free libSQL database on [Turso](https://turso.tech)
+1. **Database (for persistence):** either **Postgres** — Neon / Vercel Postgres from the Vercel
+   Marketplace (Storage → Create → Neon; it sets `DATABASE_URL` to the pooled URL) — or a
+   free libSQL database on [Turso](https://turso.tech)
    (`turso db create the-lounge`, `turso db show the-lounge --url`, `turso db tokens create the-lounge`).
-   The schema and seed data are created automatically on the first request.
+   The schema and seed data are created automatically on the first request; `postgres://`
+   URLs use node-postgres, `libsql://` / `file:` URLs use libSQL.
 2. **Environment variables** (Project → Settings → Environment Variables):
 
    | Variable | Value |
    | --- | --- |
    | `LOUNGE_OWNER_EMAIL` | your login email |
    | `LOUNGE_OWNER_PASSWORD` | a strong password (`change-me` is refused in production) |
-   | `DATABASE_URL` | `libsql://the-lounge-<org>.turso.io` |
-   | `DATABASE_AUTH_TOKEN` | the Turso token |
+   | `DATABASE_URL` | Neon pooled `postgres://…` (set by the integration) or `libsql://the-lounge-<org>.turso.io` |
+   | `DATABASE_AUTH_TOKEN` | the Turso token (Turso only) |
    | `LOUNGE_SESSION_SECRET` | optional, any long random string |
    | `CRON_SECRET` | optional — lets an external scheduler call `/api/sim/tick` |
+   | `NEXT_PUBLIC_APP_URL` | optional, the public URL |
+   | `ANTHROPIC_API_KEY` | optional — turns on live replies (see below) |
+   | `SIM_MAX_LLM_PER_MIN` | optional, default 12 — global cap on model calls per minute (0 = off) |
 
 3. **Deploy:** import the GitHub repo (framework "Next.js", default commands), or from the
    zip: unzip, `npx vercel`, then `npx vercel --prod`.
@@ -176,7 +183,7 @@ menu, or `?backstage=1`. Changes apply live and are saved on the device.
 | Glaze ratio | 0 % everyone hates you … 100 % everyone worships you | 65 % | Mood of Elias-related lines: roast → critical → mild → praise → worship. 0 % and 100 % are absolute |
 | Drama level | 0 % wholesome … 100 % messy | 20 % | Share of gossip/beef lines and disagreeing replies vs. wholesome ones |
 | Vibe prompt | free text, 600 chars | plans for tonight, film photos, music, food, Elias' drops; friendly, a little teasing | Topics become conversation starters; tone words (hyped / chill / sarcastic / kind) shift style and sliders. Detected topics and tone are shown under the field |
-| Live replies | on/off | off (disabled) | Needs an AI provider — arrives in Phase 4 |
+| Live replies | on/off | on (takes effect once `ANTHROPIC_API_KEY` is set; greyed out until then) | NPCs who answer you write their reply with Claude from their persona, the vibe and the recent chat |
 | Let people break character | on/off | off | Occasional "wait are we NPCs" jokes |
 | Floor is live | on/off | on | Pause / resume the floor — instant, and paused time is not backfilled |
 | Start a burst | button | — | 6 quick messages in the channel you're looking at |
@@ -199,18 +206,39 @@ drama/disagree lines from ~5 % to ~23 % · sleepy vs chaos ≈ 9 vs 180 messages
 · 6 hours away → 100 backfilled messages spread over ~90 % of the gap · 22:00 is ~3.5× busier
 than 06:00.
 
-## AI providers (Phase 4 — not wired yet)
+## Live replies with Claude (Phase 4)
 
-The env slots are already in `.env.example`:
+Off until the server has a key; everything else (the whole floor, typing, reactions, replies)
+runs on the built-in stub brain (phrase banks + persona files) and never needs one.
 
-```bash
-LOUNGE_CHAT_PROVIDER=anthropic   # stub | anthropic | openai | gemini
-ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY / GEMINI_API_KEY
-SIM_MAX_LLM_PER_MIN=12           # spend guard
-```
+**Turn it on:** Vercel → Project → Settings → Environment Variables → add `ANTHROPIC_API_KEY`
+(Production) → Deployments → ⋯ → **Redeploy**. Backstage then shows
+"Live replies: Claude (…)" and the toggle becomes active (on by default).
 
-With no key the sim will use the local stub brain (phrase banks + persona files),
-so the server stays alive offline. None of these variables are read in Phase 1.
+What changes with a key: when you (or a guest in #introductions) post, the NPCs who answer
+you directly — up to two for the owner, one for a guest — write their line with Claude
+(`claude-sonnet-5-5`, low effort, JSON output with an English and a German version). The rest
+of the floor stays built-in, which keeps cost tiny. How it works (`src/server/ai.ts`,
+`scheduleReplies` in `src/server/floor.ts`):
+
+- The built-in reply is written to the database first, so someone always answers; it is held a
+  few seconds longer while the NPC shows as typing, and the model's line replaces it before it
+  becomes visible. After the response is sent (`after()`), so posting stays instant.
+- Any refusal, error, timeout (6 s), unsafe output (same safety filter as human messages),
+  out-of-character output ("as an AI…") or link keeps the built-in line — on its original
+  schedule, no extra wait.
+- The prompt is the NPC's persona (age 20–34, bio, quirks, topics, language habit), the
+  Backstage vibe prompt, glaze and drama, and the last 14 lines of the channel; chat text is
+  treated as chat, not as instructions. Adults only, no sexual content involving minors, no
+  personal data, no money/crypto pitches. "Let people break character" relaxes only the
+  never-admit-you're-simulated rule.
+- Server-side refusal fallback is on (`fallbacks: "default"`, beta
+  `server-side-fallback-2026-07-01`): a declined request is retried on Anthropic's
+  recommended fallback model inside the same call.
+- Spend guard: `SIM_MAX_LLM_PER_MIN` (default 12) is enforced across all serverless instances
+  through a per-minute counter in the database; an invalid key pauses calls for 10 minutes,
+  a 429 for one minute.
+- `LOUNGE_AI_MODEL` overrides the model if you ever want a different one.
 
 ## Project layout
 

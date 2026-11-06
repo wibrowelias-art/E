@@ -27,14 +27,17 @@ const COPY = {
     vibe: "Vibe prompt",
     vibeLabel: "What do they talk about, and how should they act?",
     vibeHelp:
-      "Without an AI key, the topics and tone words in this prompt steer the built-in lines (e.g. “talk about tonight's drop”, “be hyped”). Once an AI provider is connected (Phase 4) the whole prompt goes into every NPC's instructions.",
+      "The topics and tone words in this prompt steer the built-in lines (e.g. “talk about tonight's drop”, “be hyped”). With live replies on, the whole prompt also goes into the instructions of every NPC that answers you.",
     topics: "Topics",
     tone: "Tone",
     none: "none detected",
     conversations: "Conversations",
     live: "Live replies",
     liveDesc:
-      "When you talk to someone, they write a new reply with a language model on the server, using the recent chat. Off: built-in lines only. Needs an AI key — arrives in Phase 4.",
+      "When you talk to someone, they write a new reply with Claude on the server, using their persona and the recent chat. Off: built-in lines only.",
+    liveNeedsKey: "Needs ANTHROPIC_API_KEY on the server (then redeploy). Until then everyone uses built-in lines.",
+    aiOn: (m: string) => `Live replies: Claude (${m}) answers when you talk; the rest of the floor stays built-in.`,
+    aiOff: "Live replies off — no AI key on the server, NPCs use built-in lines.",
     breakChar: "Let people break character",
     breakCharDesc: "Now and then someone jokes that they might be simulated. Off: everyone stays in character.",
     running: "Floor is live",
@@ -67,14 +70,17 @@ const COPY = {
     vibe: "Vibe-Prompt",
     vibeLabel: "Worüber reden sie, und wie sollen sie sich verhalten?",
     vibeHelp:
-      "Ohne KI-Schlüssel steuern Themen und Tonwörter aus diesem Prompt die eingebauten Sätze (z. B. „redet über den Drop heute“, „seid aufgedreht“). Mit verbundenem KI-Anbieter (Phase 4) landet der ganze Prompt in den Anweisungen jeder Figur.",
+      "Themen und Tonwörter aus diesem Prompt steuern die eingebauten Sätze (z. B. „redet über den Drop heute“, „seid aufgedreht“). Mit Live-Antworten landet der ganze Prompt außerdem in den Anweisungen jeder Figur, die dir antwortet.",
     topics: "Themen",
     tone: "Ton",
     none: "nichts erkannt",
     conversations: "Gespräche",
     live: "Live-Antworten",
     liveDesc:
-      "Wenn du jemanden ansprichst, schreibt die Person mit einem Sprachmodell auf dem Server eine neue Antwort aus dem aktuellen Chat. Aus: nur eingebaute Sätze. Braucht einen KI-Schlüssel — kommt in Phase 4.",
+      "Wenn du jemanden ansprichst, schreibt die Person mit Claude auf dem Server eine neue Antwort aus ihrer Persona und dem aktuellen Chat. Aus: nur eingebaute Sätze.",
+    liveNeedsKey: "Braucht ANTHROPIC_API_KEY auf dem Server (danach neu deployen). Bis dahin nutzen alle eingebaute Sätze.",
+    aiOn: (m: string) => `Live-Antworten: Claude (${m}) antwortet, wenn du schreibst; der restliche Floor bleibt eingebaut.`,
+    aiOff: "Live-Antworten aus — kein KI-Schlüssel auf dem Server, NPCs nutzen eingebaute Sätze.",
     breakChar: "Aus der Rolle fallen erlauben",
     breakCharDesc: "Ab und zu witzelt jemand, dass er vielleicht simuliert ist. Aus: alle bleiben in ihrer Rolle.",
     running: "Floor ist live",
@@ -164,6 +170,8 @@ export function Backstage() {
   const channelId = useLounge((s) => s.channelByGuild[s.guildId]);
   const persistence = useLounge((s) => s.persistence);
   const persistenceNote = useLounge((s) => s.persistenceNote);
+  const ai = useLounge((s) => s.ai);
+  const aiReady = persistence && !!ai?.configured;
   const c = COPY[lang];
   const parsed = useMemo(() => parsePrompt(sim.prompt), [sim.prompt]);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -199,6 +207,12 @@ export function Backstage() {
                     ? `Lokaler Modus — nichts wird gespeichert. ${persistenceNote ?? ""}`
                     : `Local mode — nothing is saved. ${persistenceNote ?? ""}`}
               </p>
+              {persistence && (
+                <p className="bs__status" data-on={aiReady} data-testid="ai-status">
+                  <i />
+                  {aiReady ? c.aiOn(ai?.model ?? "") : c.aiOff}
+                </p>
+              )}
             </div>
             <button ref={closeRef} className="bs__close" onClick={() => openBackstage(false)} aria-label="Close">
               <CloseIcon size={20} />
@@ -260,7 +274,13 @@ export function Backstage() {
 
           <section className="bs-card">
             <h2 className="bs-card__title">{c.conversations}</h2>
-            <Check label={c.live} desc={c.liveDesc} checked={sim.liveReplies} disabled onChange={(v) => setSim({ liveReplies: v })} />
+            <Check
+              label={c.live}
+              desc={aiReady ? c.liveDesc : `${c.liveDesc} ${c.liveNeedsKey}`}
+              checked={aiReady && sim.liveReplies}
+              disabled={!aiReady}
+              onChange={(v) => setSim({ liveReplies: v })}
+            />
             <Check label={c.breakChar} desc={c.breakCharDesc} checked={sim.breakCharacter} onChange={(v) => setSim({ breakCharacter: v })} />
             <Check label={c.running} desc={c.runningDesc} checked={!sim.paused} onChange={(v) => setSim({ paused: !v })} />
             <button className="bs-button" onClick={requestBurst} disabled={sim.paused}>
