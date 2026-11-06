@@ -6,13 +6,12 @@ A dark, Discord-class community app for **GOD // THE LOUNGE** — a Hamburg serv
 that should feel packed and alive the moment you open it. Original name, logo,
 icons and content; no Discord assets, fonts or trademarks.
 
-> **Status: Phases 0–2 done, plus an early slice of Phase 3.** UI matched to the
-> reference screenshots, English/Deutsch, **Backstage**, a built-in-lines NPC floor,
-> and now **persistence + login**: messages, edits and reactions live in a libSQL
-> database, history loads from it, everyone sees the same floor through a 1.5 s poll,
-> the owner signs in with a password and guests can look around as Tourists.
-> Still to come: the server-side always-on tick (Phase 3) and live AI providers (Phase 4).
-> See [`docs/PLAN.md`](docs/PLAN.md).
+> **Status: Phases 0–3 done.** UI matched to the reference screenshots,
+> English/Deutsch, **Backstage**, persistence + login, and now the **always-on server
+> floor**: the server plans the NPCs (messages, typing, reactions, voice, presence) and
+> stores them, so the room keeps moving with nobody online and everyone sees the same
+> typing indicators. Coming back after hours fills in the missed history. Next: live AI
+> providers (Phase 4). See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Run
 
@@ -30,10 +29,11 @@ with the guilds, the 32 NPCs and the backlog. `pnpm db:reset` wipes and re-seeds
 | `pnpm dev` / `pnpm build` / `pnpm start` | Next.js dev / production build / serve |
 | `pnpm typecheck` | `tsc --noEmit` (strict) |
 | `pnpm db:reset` / `pnpm db:status` | Wipe + re-seed the database / show row counts (uses `DATABASE_URL` or `./data/lounge.db`) |
-| `pnpm api:check` | Phase 2 API tests: auth, persistence, poll, edits, reactions, history paging, guest limits, owner-only routes, safety filter |
+| `pnpm api:check` | API tests: auth, persistence, poll, edits, reactions, history paging, guest limits, owner-only routes, safety filter — plus the live server floor, shared typing, NPC replies, bursts, #ops audit log, catch-up and pause (needs `LOUNGE_ALLOW_TEST_HOOKS=1` for the catch-up test) |
 | `pnpm seed` | Validates the 32-NPC cast, channel map and backlog (ages 20–34, no duplicate lines, nothing posted as Elias) and writes `data/seed.json` |
 | `pnpm shots` | Renders every screen and the CURRENT vs REFERENCE sheets into `docs/screenshots/` (needs a running server, `BASE_URL` to override) |
 | `pnpm smoke` | Browser checks: login form, send → reload → still there, ↑ edit, Esc, reactions, language switch, Backstage, guest read-only, owner floor reaching a guest through the database, mobile navigation |
+| `pnpm floor:check` | Server floor planner, in memory with a simulated clock: cold open, 5-minute volume, duplicates, Elias share, replies, every Backstage control, mute, 6-hour catch-up, time of day, replies to humans, bursts |
 | `pnpm sim:check` | Simulator acceptance tests with a fake clock (cold open, 5-minute volume, duplicates, Elias share, every Backstage control) |
 
 URLs: `/` (mobile opens on the channel list), `/channels/lounge/<channel>`,
@@ -60,9 +60,22 @@ list / chat with the same row structure as the reference screenshots.
    | `DATABASE_URL` | `libsql://the-lounge-<org>.turso.io` |
    | `DATABASE_AUTH_TOKEN` | the Turso token |
    | `LOUNGE_SESSION_SECRET` | optional, any long random string |
+   | `CRON_SECRET` | optional — lets an external scheduler call `/api/sim/tick` |
 
 3. **Deploy:** import the GitHub repo (framework "Next.js", default commands), or from the
    zip: unzip, `npx vercel`, then `npx vercel --prod`.
+
+**How the floor runs on Vercel:** functions freeze between requests, so the floor advances
+whenever someone polls (every 1.5 s per open tab). With nobody online nothing is computed;
+the next visitor's first request backfills the gap as believable, thinned-out history
+(at most 100 messages, following the time of day) and the Doorman notes it in `#npc-debug`.
+If you want messages generated in real time even with nobody watching, point a scheduler
+(e.g. cron-job.org, every minute) at `GET /api/sim/tick` with
+`Authorization: Bearer $CRON_SECRET`. On a long-running server (`pnpm start`, Docker) a
+built-in ticker does this every 4 s (`LOUNGE_FLOOR_TICKER=off` disables it).
+Database cost: each tick reads ~600 rows, at most one tick per 4 s — roughly 13M row reads per
+day if someone is online around the clock (Turso's free tier allows 500M per month; with the
+built-in ticker on a 24/7 server, budget for a paid tier or raise `TICK_EVERY_MS`).
 
 Without `DATABASE_URL` the deploy still works: it runs in local mode (each visitor's
 browser runs its own floor, nothing is saved) and the login page says so. Without an owner
@@ -86,15 +99,38 @@ either is configured, demo mode switches off.
   new messages, edits, reactions, presence and voice changes.
 - **Sending** is optimistic: the message appears instantly, turns solid when the server
   confirms, or shows "Failed to send — Retry / Discard".
-- **The floor:** with a database, only the owner's browser runs the simulator (one tab, via
-  the Web Locks API) and syncs its output to the server once a second; guests see it through
-  the poll. Phase 3 moves this to a server tick so it keeps going with nobody online.
+- **The floor** runs on the server (Phase 3, below); browsers only read it.
 - **Safety filter** (server-side on every human post/edit and every simulator line, and in
   `pnpm seed` for the phrase banks): sexual content involving minors, scams / money requests,
   doxxing (street addresses, phone numbers, IBANs, licence plates) are blocked with a message.
 - Rate limits: owner 8 messages / 5 s, guests 3 / 6 s (per server instance).
-- **Not yet:** read state is per browser (not stored), typing indicators are only visible in
-  the owner's browser, no magic-link login, no account management beyond the owner + guests.
+- **Not yet:** read state is per browser (not stored), no magic-link login, no account
+  management beyond the owner + guests.
+
+## The server floor (Phase 3)
+
+- **Planner** (`src/lib/sim/planner.ts`): pure and clock-free — the same brain and phrase
+  banks as before, now driven by a time window. It keeps its state (current burst, thread,
+  recently used templates) in `sim_state`.
+- **Tick** (`src/server/floor.ts`): plans 12 s ahead, at most every 4 s, under a lease so only
+  one server instance plans at a time. Future messages are stored with their typing time;
+  they become visible when their time comes, and while someone is "typing" the poll reports
+  it, so **every visitor sees the same typing indicators**.
+- **Replies:** when you post, 1–3 NPCs answer (the first always as a reply to you); when a
+  guest posts, someone welcomes them — scheduled on the server, so it works with your tab closed.
+- **Catch-up:** after a gap longer than ~4 minutes, the missed time is backfilled as history
+  without typing, thinned to at most 100 messages and shaped by the time of day (06:00 is
+  ~3× quieter than 22:00); the last 3 minutes are filled at full density.
+- **Uniqueness** (spec: "no duplicate strings in the last N messages per channel"): no exact
+  repeat within the channel's last 60 messages or the last 100 lines anywhere; a word-overlap
+  near-duplicate guard (≥ 75 %) against the channel's last 40 and the last 40 anywhere; and a
+  per-mood template window that always leaves the least-recently-used ~20 % of each mood free,
+  so a floor running for days never runs out of lines.
+- **Pause and mute are instant:** scheduled-but-not-yet-visible lines are dropped, and every
+  insert re-checks pause/mute inside the same database transaction.
+- **Audit:** Backstage changes are posted to `#ops` by the Doorman ("Backstage: glaze 65% →
+  30% · muted Mara"); catch-ups are posted to `#npc-debug`.
+- **Local mode** (no database) still runs the floor in the browser, as before.
 
 Tables: `users`, `guilds`, `categories`, `channels`, `memberships`, `messages`, `reactions`,
 `reaction_users`, `npc_profiles`, `relationships`, `sim_state`, `meta` (revision counter) —
@@ -142,29 +178,26 @@ menu, or `?backstage=1`. Changes apply live and are saved on the device.
 | Vibe prompt | free text, 600 chars | plans for tonight, film photos, music, food, Elias' drops; friendly, a little teasing | Topics become conversation starters; tone words (hyped / chill / sarcastic / kind) shift style and sliders. Detected topics and tone are shown under the field |
 | Live replies | on/off | off (disabled) | Needs an AI provider — arrives in Phase 4 |
 | Let people break character | on/off | off | Occasional "wait are we NPCs" jokes |
-| Floor is live | on/off | on | Pause / resume the simulation |
+| Floor is live | on/off | on | Pause / resume the floor — instant, and paused time is not backfilled |
 | Start a burst | button | — | 6 quick messages in the channel you're looking at |
+| Mute NPCs | chips | nobody | Muted members stop posting and reacting immediately |
 
 Presets: **Default vibe**, **Wholesome Sunday**, **Afterhours chaos**,
 **Roast night**; "Reset everything to the default vibe" restores all controls.
 Roasts stay playful — the phrase banks contain no slurs, threats, real addresses
 or anything involving minors.
 
-Simulator (Phase 3 preview, `src/lib/sim/`): quiet gaps then 3–6 message bursts,
-typing indicators (sometimes typing then giving up), ~45 % replies following the
-relationship graph, max 2 posts in a row per NPC, NPC reactions, voice
-join/leave/speaking, presence changes, replies when you post, and backfill when you
-return to the tab. Every line is checked against the last 300 messages and the last
-110 templates used. **Limits:** it runs in your browser tab, so each visitor sees their
-own floor and nothing is saved; the shared server-side tick comes in Phase 3, and there
-is no login yet, so anyone who can open the app can open Backstage (owner-only gating
-comes with auth in Phase 2).
+The floor's behaviour (both the server floor and local mode): quiet gaps then 3–6 message
+bursts, typing indicators, ~45–60 % replies following the relationship graph, max 2 posts in a
+row per NPC, NPC reactions, voice join/leave/speaking, presence changes, time-of-day rhythm.
 
-`pnpm sim:check` (default vibe, 5 simulated minutes): cold open 4 messages + a reply
-chain within 15 s · 49–60 messages · 0 near-duplicate pairs · 15–26 mention Elias /
-The Lounge / his apps · ~45 % replies · glaze 0 % → 0 % praise, 100 % → 0 % roasts ·
-drama 0 % → 100 % raises drama/disagree lines ~5–8× · sleepy vs chaos ≈ 8 vs 140
-messages in 3 minutes.
+`pnpm floor:check` (server planner, default vibe, 5 simulated minutes, 8 consecutive runs
+all green): cold open ≥ 3 messages + a reply chain within 15 s · 67–75 messages · 0
+near-duplicate pairs · 0 exact duplicates · ~20 of them mention Elias / The Lounge / his apps
+· ~60 % replies · glaze 0 % → 0 % praise, 100 % → 0 % roasts · drama 0 % → 100 % takes
+drama/disagree lines from ~5 % to ~23 % · sleepy vs chaos ≈ 9 vs 180 messages in 3 minutes
+· 6 hours away → 100 backfilled messages spread over ~90 % of the gap · 22:00 is ~3.5× busier
+than 06:00.
 
 ## AI providers (Phase 4 — not wired yet)
 
@@ -188,11 +221,13 @@ src/components/     AppShell, ServerRail, ChannelPanel, Chat, MessageList, Messa
 src/data/           npcs.ts (cast), guilds.ts (channel map), messages.ts (backlog),
                     seed.ts (assembly + validation), fixture.ts (comparison fixtures)
 src/lib/            types, zustand store, markup renderer, time formatting
-scripts/            seed.ts, db.ts, compare.mjs (screenshots), smoke.mjs, api-check.mjs, sim-check.mjs
-src/server/         db (schema, seed), auth (sessions), repo (queries + permissions), http helpers
-src/app/api/        auth, bootstrap, poll, messages (+ history, edit, reactions), sim (batch, settings)
+scripts/            seed.ts, db.ts, compare.mjs (screenshots), smoke.mjs, api-check.mjs, floor-check.ts, sim-check.mjs
+src/server/         db (schema, seed, migrations), auth (sessions), repo (queries + permissions),
+                    floor (server tick, catch-up, replies, bursts), ticker, http helpers
+src/instrumentation.ts  starts the 4 s floor ticker on long-running servers
+src/app/api/        auth, bootstrap, poll, messages (+ history, edit, reactions), sim (tick, burst, settings)
 src/app/login/      sign-in page
-src/lib/sim/        settings + presets, phrase banks (EN + DE), brain (stub composer), engine (clock)
+src/lib/sim/        planner (server floor), settings + presets, phrase banks (EN + DE), brain (stub composer), engine (clock)
 src/lib/i18n.ts     UI strings (English / Deutsch)
 docs/               PLAN.md (Phase 0), reference/ (privacy-blurred references), screenshots/
 ```

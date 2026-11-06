@@ -159,4 +159,6 @@ export interface SimSettings {
   /** NPCs may joke about being simulated. */
   breakCharacter: boolean;
   paused: boolean;
+  /** NPC user ids that never post or react. */
+  muted?: string[];
 }

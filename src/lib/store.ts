@@ -9,7 +9,6 @@ import { api, ApiFailure } from "./api";
 import { LANG_STORAGE_KEY, STRINGS, type Lang } from "./i18n";
 import { safetyCheck, SAFETY_MESSAGE } from "./safety";
 import { clampSettings, DEFAULT_SIM, PRESETS, SIM_STORAGE_KEY } from "./sim/settings";
-import { queueSimMessage, queueSimReaction, queueSimUser } from "./sync";
 import type { ChannelReadState, Message, RoleId, SimSettings, User } from "./types";
 
 export interface SimLogEntry {
@@ -48,6 +47,19 @@ interface BootResponse {
   messages?: Message[];
   sim?: SimSettings | null;
   rev?: number;
+  serverNow?: number;
+  typing?: TypingEntry[];
+}
+
+export interface TypingEntry {
+  channelId: string;
+  userId: string;
+}
+
+function typingMap(list: TypingEntry[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const t of list) (out[t.channelId] ??= []).includes(t.userId) || out[t.channelId]!.push(t.userId);
+  return out;
 }
 
 interface LoungeState {
@@ -59,6 +71,8 @@ interface LoungeState {
   persistence: boolean;
   persistenceNote: string | null;
   rev: number;
+  /** Server time of the last poll (second cursor for scheduled floor messages). */
+  serverNow: number;
   history: Record<string, { hasMore: boolean; loading: boolean }>;
   toast: { text: string; kind: "error" | "info" } | null;
   users: Record<string, User>;
@@ -86,7 +100,7 @@ interface LoungeState {
 
   boot: (opts: { now: number; forceLocal?: boolean }) => Promise<void>;
   hydrateLocal: (now: number, viewer?: User) => void;
-  mergeServer: (messages: Message[], users: User[], rev: number) => void;
+  mergeServer: (messages: Message[], users: User[], rev: number, serverNow?: number, typing?: TypingEntry[]) => void;
   loadOlder: (channelId: string) => Promise<void>;
   selectGuild: (guildId: string) => void;
   selectChannel: (channelId: string, opts?: { openChat?: boolean }) => void;
@@ -138,6 +152,7 @@ export const useLounge = create<LoungeState>((set, get) => ({
   persistence: false,
   persistenceNote: null,
   rev: 0,
+  serverNow: 0,
   history: {},
   toast: null,
   users: {},
@@ -199,9 +214,10 @@ export const useLounge = create<LoungeState>((set, get) => ({
       messages,
       history,
       rev: res.rev ?? 0,
-      // Seeded read/typing state was a static fake; real unread comes from the poll.
+      serverNow: res.serverNow ?? Date.now(),
+      // Seeded read state was a static fake; real unread comes from the poll. Typing comes from the server floor.
       readState: {},
-      typing: {},
+      typing: typingMap(res.typing ?? []),
       ...(res.sim ? { sim: clampSettings({ ...res.sim, paused: res.sim.paused }) } : {}),
     });
   },
@@ -214,7 +230,7 @@ export const useLounge = create<LoungeState>((set, get) => ({
     set({ ready: true, now, users, messages: seed.messages });
   },
 
-  mergeServer: (incoming, users, rev) =>
+  mergeServer: (incoming, users, rev, serverNow, typing) =>
     set((s) => {
       const index = new Map(s.messages.map((m, i) => [m.id, i]));
       const messages = [...s.messages];
@@ -237,7 +253,21 @@ export const useLounge = create<LoungeState>((set, get) => ({
         readState[m.channelId] = { unread: true, mentions: prev.mentions + (mentioned ? 1 : 0) };
       }
       const nextUsers = users.length ? { ...s.users, ...Object.fromEntries(users.map((u) => [u.id, u])) } : s.users;
-      return { messages: insertSorted(messages, fresh), users: nextUsers, rev: Math.max(s.rev, rev), readState, now: Date.now() };
+      // Backstage live feed: what the server floor just published.
+      const floorLines = fresh
+        .filter((m) => m.simTag && m.simTag !== "system")
+        .map((m) => ({ at: m.createdAt, authorId: m.authorId, channelId: m.channelId, category: m.simTag!, text: m.i18n?.en ?? m.content, textDe: m.i18n?.de ?? m.content }))
+        .reverse();
+      return {
+        messages: insertSorted(messages, fresh),
+        users: nextUsers,
+        rev: Math.max(s.rev, rev),
+        serverNow: serverNow ?? s.serverNow,
+        readState,
+        now: Date.now(),
+        ...(typing ? { typing: typingMap(typing) } : {}),
+        ...(floorLines.length ? { simLog: [...floorLines, ...s.simLog].slice(0, 12) } : {}),
+      };
     }),
 
   loadOlder: async (channelId) => {
@@ -421,7 +451,13 @@ export const useLounge = create<LoungeState>((set, get) => ({
 
   openBackstage: (backstageOpen) => set({ backstageOpen: backstageOpen && get().role === "owner", settingsMenu: null }),
   openSettingsMenu: (settingsMenu) => set({ settingsMenu }),
-  requestBurst: () => set((s) => ({ burstSeq: s.burstSeq + 1 })),
+  requestBurst: () => {
+    const s = get();
+    if (!s.persistence) return set({ burstSeq: s.burstSeq + 1 });
+    void api("/api/sim/burst", { body: { channelId: s.channelByGuild[s.guildId] } }).catch((e: unknown) =>
+      get().showToast(e instanceof Error ? e.message : "Burst failed."),
+    );
+  },
   resetSim: () => get().setSim({ ...DEFAULT_SIM }),
 
   logout: async () => {
@@ -430,7 +466,6 @@ export const useLounge = create<LoungeState>((set, get) => ({
   },
 
   npcPost: (msg, category) => {
-    queueSimMessage(msg);
     set((s) => {
       const current = s.channelByGuild[s.guildId];
       const visible = msg.channelId === current && (typeof document === "undefined" || !document.hidden);
@@ -462,7 +497,6 @@ export const useLounge = create<LoungeState>((set, get) => ({
     }),
 
   npcReact: (messageId, emoji) => {
-    queueSimReaction(messageId, emoji);
     set((s) => ({
       messages: s.messages.map((m) => {
         if (m.id !== messageId) return m;
@@ -476,7 +510,6 @@ export const useLounge = create<LoungeState>((set, get) => ({
   },
 
   patchUser: (userId, patch) => {
-    if (get().users[userId]?.isNpc) queueSimUser(userId, patch);
     set((s) => (s.users[userId] ? { users: { ...s.users, [userId]: { ...s.users[userId]!, ...patch } } } : {}));
   },
 

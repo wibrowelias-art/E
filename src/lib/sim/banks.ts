@@ -69,6 +69,9 @@ export type Category =
 
 export const BANKS: Record<Category, Line[]> = {
   worship: [
+    L("elias doesn't take photos, he takes evidence that hamburg is beautiful", "elias macht keine fotos, er sammelt beweise, dass hamburg schön ist", [GLAZE, PHOTO]),
+    L("i'd queue three hours in the rain for an elias invite", "ich würde drei stunden im regen für eine elias einladung anstehen", [GLAZE, NIGHT]),
+    L("the lounge is the best thing that happened to this city since the elbphilharmonie", "die lounge ist das beste, was dieser stadt seit der elbphilharmonie passiert ist", [GLAZE, GENERAL]),
     L("elias, {shot} should be in a museum. i'm not joking", "elias, {shot} müsste man ins museum hängen. kein witz", [GLAZE, GENERAL]),
     L("elias could photograph a parking lot and it'd still be the best thing on my feed", "elias könnte einen parkplatz fotografieren und es wär trotzdem das beste in meinem feed", [GLAZE]),
     L("the way elias built The Lounge from nothing… we're witnessing history", "wie elias The Lounge aus dem nichts gebaut hat… wir erleben hier geschichte", [GLAZE, GENERAL]),
@@ -81,6 +84,10 @@ export const BANKS: Record<Category, Line[]> = {
     L("elias walked in and the lighting got better. explain that", "elias kommt rein und das licht wird besser. erklär mir das", [GLAZE, NIGHT]),
   ],
   praise: [
+    L("elias' set list for the last night was perfect, no notes", "elias' playlist letzte nacht war perfekt, keine anmerkungen", [NIGHT, GLAZE]),
+    L("respect to elias for keeping the lounge free of weird vibes", "respekt an elias, dass die lounge frei von komischen vibes bleibt", [GLAZE, GENERAL]),
+    L("the new {project} icon elias made is so clean", "das neue {project} icon von elias ist so clean", [BUILD, GLAZE]),
+    L("elias hosting the photo walk himself was a nice touch", "dass elias den photo walk selbst geleitet hat, war schön", [PHOTO, GLAZE]),
     L("can't stop thinking about {shot} from elias", "ich krieg {shot} von elias nicht aus dem kopf", [GLAZE, PHOTO]),
     L("ok the new {project} update is actually smooth, onboarding feels way faster", "ok das neue {project} update ist echt smooth, onboarding fühlt sich viel schneller an", [BUILD, GLAZE]),
     L("credit where it's due, elias' door policy keeps the vibe right", "muss man elias lassen, seine türpolitik hält den vibe richtig", [GLAZE, NIGHT]),
@@ -104,6 +111,9 @@ export const BANKS: Record<Category, Line[]> = {
     L("elias answered my DM with one thumbs up. we're basically best friends", "elias hat auf meine DM mit einem daumen geantwortet. wir sind quasi beste freunde", [GENERAL, MEMES]),
   ],
   critical: [
+    L("elias, the last invite drop sold out in two minutes and half of us missed it", "elias, der letzte invite drop war in zwei minuten weg und die hälfte hat's verpasst", [GENERAL, GLAZE]),
+    L("love the lounge but the door queue last friday was too long", "ich liebe die lounge, aber die schlange letzten freitag war zu lang", [NIGHT, GENERAL]),
+    L("{project} looks great but i still can't find the settings", "{project} sieht super aus, aber ich finde die einstellungen immer noch nicht", [BUILD]),
     L("not to be that person but {project} still crashes when i upload more than 20 photos", "nicht böse gemeint aber {project} stürzt immer noch ab wenn ich über 20 fotos hochlade", [BUILD]),
     L("{shot} was good but elias, we've seen neon in puddles a lot lately", "ich mag {shot}, aber elias, neon in pfützen hatten wir jetzt echt oft", [GLAZE, PHOTO]),
     L("the guest list last week was a bit messy ngl", "die gästeliste letzte woche war schon etwas chaotisch ngl", [GENERAL, NIGHT]),
@@ -114,6 +124,9 @@ export const BANKS: Record<Category, Line[]> = {
     L("the photo walk started 40 minutes late because someone wanted 'one more shot'", "der photo walk hat 40 minuten später angefangen weil jemand 'noch ein foto' wollte", [PHOTO, GENERAL]),
   ],
   roast: [
+    L("elias said 'soft launch' about something we've been waiting for since spring", "elias sagt 'soft launch' zu etwas, auf das wir seit dem frühling warten", [BUILD, GENERAL]),
+    L("elias owns more camera straps than finished apps", "elias hat mehr kameragurte als fertige apps", [MEMES, BUILD]),
+    L("breaking: elias posts a photo that isn't at night. just kidding, it's at night", "eilmeldung: elias postet ein foto, das nicht nachts ist. spaß, ist nachts", [MEMES, PHOTO]),
     L("elias' photos are just a black screen with one light in it. every time", "elias' fotos sind einfach schwarzer bildschirm mit einer lampe. jedes mal", [GLAZE, MEMES]),
     L("{project} has more 'coming soon' screens than features", "{project} hat mehr 'coming soon' screens als features", [BUILD, MEMES]),
     L("i'm starting a rival server. it'll be called The Hallway", "ich mach einen gegen-server auf. heißt The Hallway", [GENERAL, MEMES]),
@@ -126,6 +139,20 @@ export const BANKS: Record<Category, Line[]> = {
     L("if i see one more neon puddle i'm leaving the server", "noch eine neon-pfütze und ich verlass den server", [PHOTO, GLAZE]),
   ],
   drama: [
+    L("{npc} left me on read for two days and then reacted to my story. explain", "{npc} lässt mich zwei tage auf gelesen und reagiert dann auf meine story. erklär mal", [GENERAL]),
+    L("why does {npc} always arrive right when the bill comes", "warum kommt {npc} immer genau dann, wenn die rechnung kommt", [GENERAL, NIGHT]),
+    L("{npc} took the last spot on the guest list for someone nobody knows. bold move", "{npc} hat den letzten gästelisten-platz an jemanden vergeben, den keiner kennt. mutig", [NIGHT]),
+    L("{npc} and {npc2} were 'just talking' at the bar for three hours. sure", "{npc} und {npc2} haben drei stunden an der bar 'nur geredet'. klar", [NIGHT, GENERAL]),
+    L("not to start anything but {npc}'s playlist cleared the dance floor", "will nichts anfangen, aber {npc}s playlist hat die tanzfläche geleert", [NIGHT, GENERAL]),
+    L("{npc} said they were sick and then showed up in someone else's story at 2am", "{npc} war angeblich krank und taucht dann um 2 uhr in fremden stories auf", [GENERAL]),
+    L("can someone tell {npc} the group chat is not their diary", "kann jemand {npc} sagen, dass der gruppenchat kein tagebuch ist", [GENERAL, RANDOM]),
+    L("the way {npc} deleted that message fast… we saw it", "wie schnell {npc} die nachricht gelöscht hat… wir haben's gesehen", [GENERAL]),
+    L("{npc} borrowed my lens 'for one night' in september", "{npc} hat sich im september mein objektiv 'für eine nacht' geliehen", [PHOTO, GENERAL]),
+    L("{npc} and {npc2} arguing about techno again, someone get the popcorn", "{npc} und {npc2} streiten schon wieder über techno, holt das popcorn", [NIGHT, GENERAL]),
+    L("{npc} unfollowed and refollowed me in the same hour. what was that", "{npc} hat mich in einer stunde entfolgt und wieder gefolgt. was war das", [GENERAL, MEMES]),
+    L("ok who told {npc} about the afterparty, it was supposed to be small", "ok wer hat {npc} von der afterparty erzählt, die sollte klein bleiben", [NIGHT]),
+    L("{npc} is acting like we didn't see them leave with {npc2}", "{npc} tut so, als hätten wir nicht gesehen, dass sie mit {npc2} gegangen sind", [NIGHT, GENERAL]),
+    L("{npc} still hasn't paid for the taxi. we all remember", "{npc} hat das taxi immer noch nicht bezahlt. wir erinnern uns alle", [GENERAL, RANDOM]),
     L("{npc} really said that in #general and thought nobody would notice 👀", "{npc} hat das echt in #general geschrieben und dachte keiner merkt's 👀", [GENERAL]),
     L("not {npc} leaving the photo walk early for the OTHER party", "dass {npc} den photo walk früher verlassen hat für die ANDERE party…", [GENERAL, NIGHT]),
     L("not saying who, but someone's been screenshotting this chat", "ich sag nicht wer, aber jemand screenshottet diesen chat", [GENERAL]),
@@ -211,6 +238,10 @@ export const BANKS: Record<Category, Line[]> = {
     L("yeah no that's real", "ja nee, das ist echt so"),
   ],
   disagree: [
+    L("{name} you can't be serious", "{name} das meinst du nicht ernst"),
+    L("that's not what happened and you know it", "so war das nicht und das weißt du"),
+    L("strongly disagree, but go on", "seh ich komplett anders, aber erzähl weiter"),
+    L("{name} that's a terrible take", "{name} das ist eine furchtbare meinung"),
     L("nah {name} that's crazy", "nee {name} das ist wild"),
     L("respectfully, no", "bei allem respekt, nein"),
     L("gonna have to disagree on that one", "da muss ich widersprechen"),

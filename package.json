@@ -14,7 +14,8 @@
     "sim:check": "node scripts/sim-check.mjs",
     "db:reset": "tsx --env-file-if-exists=.env.local scripts/db.ts reset",
     "db:status": "tsx --env-file-if-exists=.env.local scripts/db.ts status",
-    "api:check": "node scripts/api-check.mjs"
+    "api:check": "node scripts/api-check.mjs",
+    "floor:check": "tsx scripts/floor-check.ts"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.2.0",

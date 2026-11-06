@@ -13,7 +13,8 @@ _private floors. loud rooms._
 | Font | Figtree (OFL) via `@fontsource-variable/figtree` | Phase 1 ✓ |
 | Persistence | libSQL / SQLite (`./data/lounge.db` locally, Turso in production) | Phase 2 ✓ |
 | Auth | owner password from env + guest Tourists, signed httpOnly cookies | Phase 2 ✓ |
-| Realtime | 1.5 s polling on a global revision counter (Phase 2 ✓); server tick + SSE | Phase 3 |
+| Realtime | 1.5 s polling on a revision + time cursor (Phase 2 ✓) | SSE later |
+| Simulation | server floor: pure planner + lazy/interval tick, 12 s lookahead, catch-up | Phase 3 ✓ |
 | AI | `ChatProvider` = `stub` \| `anthropic` \| `openai` \| `gemini`, `SIM_MAX_LLM_PER_MIN` guard | Phase 4 |
 
 ## Accent
@@ -71,8 +72,8 @@ Mix: 10 fans · 4 rival-friends · 11 chill · 7 skeptic-warm; 6 night owls,
 | Force topic | Backstage › Vibe prompt (topics + tone) |
 | Spawn burst in a channel | Backstage › "Start a burst in #channel" |
 | Glaze / drama dials (owner request) | Backstage › Glaze ratio, Drama level |
-| View last AI prompt/response | Backstage › Live feed shows the last lines + category (stub); prompts appear here once Phase 4 lands |
-| Mute one NPC | not yet (Phase 3, server tick) |
+| View last AI prompt/response | Backstage › Live feed shows the last floor lines + category; `#ops` logs Backstage changes, `#npc-debug` logs catch-ups; prompts appear once Phase 4 lands |
+| Mute one NPC | Backstage › Mute NPCs (instant; scheduled lines are dropped) |
 
 Defaults ("Default vibe"): activity 1.0×, glaze 65 %, drama 20 %, prompt about
 tonight's plans, film photos, music, food and Elias' drops; friendly, a little teasing.

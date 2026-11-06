@@ -97,6 +97,7 @@ async function init(): Promise<Client | null> {
     client = createClient({ url, authToken: process.env.DATABASE_AUTH_TOKEN || undefined });
     if (url.startsWith("file:")) await client.execute("PRAGMA journal_mode = WAL");
     await client.executeMultiple(SCHEMA);
+    await migrate(client);
     await seedIfEmpty(client);
     return client;
   } catch (e) {
@@ -105,6 +106,24 @@ async function init(): Promise<Client | null> {
     ready = null; // retry on the next request
     return null;
   }
+}
+
+/** Additive migrations for databases created by earlier phases. */
+async function migrate(c: Client) {
+  const columns = async (table: string) => new Set((await c.execute(`PRAGMA table_info(${table})`)).rows.map((r) => String(r.name)));
+  const add = async (table: string, have: Set<string>, col: string, def: string) => {
+    if (!have.has(col)) await c.execute(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  };
+  const msg = await columns("messages");
+  // Phase 3: server floor — typing time before a scheduled message becomes visible
+  await add("messages", msg, "typing_ms", "INTEGER NOT NULL DEFAULT 0");
+  const sim = await columns("sim_state");
+  await add("sim_state", sim, "state_json", "TEXT");
+  await add("sim_state", sim, "last_planned_at", "INTEGER");
+  await add("sim_state", sim, "last_tick_at", "INTEGER");
+  await add("sim_state", sim, "lease_id", "TEXT");
+  await add("sim_state", sim, "lease_until", "INTEGER");
+  await c.execute("CREATE INDEX IF NOT EXISTS messages_created ON messages (created_at)");
 }
 
 async function seedIfEmpty(c: Client) {

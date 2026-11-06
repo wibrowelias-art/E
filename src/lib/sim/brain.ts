@@ -184,9 +184,27 @@ export interface ComposeInput {
   replyToName?: string;
   otherNames: string[];
   recent: Set<string>;
-  /** Template keys used recently — avoids near-duplicates from the same template. */
-  avoid: Set<string>;
+  /** Template keys used recently, newest first — avoids near-duplicates from the same template. */
+  avoid: readonly string[];
+  /** Recent lines (English), newest last — near-duplicate guard. */
+  recentTexts?: readonly string[];
   rng: Rng;
+}
+
+const wordSet = (t: string) => new Set(t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter((w) => w.length > 1));
+
+/** True if `text` shares ≥75% of its words with any recent line (same template, one slot swapped). */
+export function nearDuplicate(text: string, recent: readonly string[]): boolean {
+  const a = wordSet(text);
+  if (a.size < 3) return false;
+  for (const r of recent) {
+    const b = wordSet(r);
+    if (b.size < 3) continue;
+    let inter = 0;
+    for (const w of a) if (b.has(w)) inter++;
+    if (inter / (a.size + b.size - inter) >= 0.75) return true;
+  }
+  return false;
 }
 
 /** Uniqueness key: normalised text, or the raw string for emoji-only / very short lines. */
@@ -214,11 +232,24 @@ function linesFor(category: Category, channelId: string, rng: Rng): Array<{ line
 export function composeLine(input: ComposeInput): Composed | null {
   const { category, rng } = input;
   const style = STYLE[input.author.id] ?? {};
-  for (let attempt = 0; attempt < 12; attempt++) {
+  // Per-mood window: block every recently used template of a mood, but always leave the
+  // least-recently-used ~20% (min 2) free — so long-running floors never run dry.
+  const blocked = new Set<string>();
+  const perCategory = new Map<string, number>();
+  for (const key of input.avoid) {
+    if (blocked.has(key)) continue;
+    const cat = key.slice(0, key.lastIndexOf(":"));
+    const used = perCategory.get(cat) ?? 0;
+    const size = BANKS[cat as Category]?.length ?? 0;
+    if (used < size - Math.max(2, Math.ceil(size * 0.2))) blocked.add(key);
+    perCategory.set(cat, used + 1);
+  }
+  const tried = new Set<string>(); // templates rejected this call — never re-drawn
+  for (let attempt = 0; attempt < 16; attempt++) {
     const topic = input.parsed.topics.length ? pick(input.parsed.topics, rng) : "tonight";
     // "does elias know about elias' drops" → skip Elias-templates when the topic is already about him.
     const fits = (o: { line: Line; key: string }) =>
-      !input.avoid.has(o.key) && !(o.line.en.includes("{topic}") && /elias/i.test(topic) && /elias/i.test(o.line.en.replace("{topic}", "")));
+      !blocked.has(o.key) && !tried.has(o.key) && !(o.line.en.includes("{topic}") && /elias/i.test(topic) && /elias/i.test(o.line.en.replace("{topic}", "")));
     const options = linesFor(category, input.channelId, rng);
     let fresh = options.filter(fits);
     if (!fresh.length) fresh = linesFor(category, "*", () => 1).filter(fits);
@@ -268,12 +299,22 @@ export function composeLine(input: ComposeInput): Composed | null {
     };
     en = finish(en);
     de = finish(de);
-    if (!en || !de) continue;
-    if (!safetyCheck(en).ok || !safetyCheck(de).ok) continue; // hard filter, same as the server
+    if (!en || !de) {
+      tried.add(template);
+      continue;
+    }
+    if (!safetyCheck(en).ok || !safetyCheck(de).ok) {
+      tried.add(template); // hard filter, same as the server
+      continue;
+    }
     const useGerman = rng() < (input.profile?.germanRatio ?? 0.5);
     const mix = useGerman ? de : en;
     const shown = input.lang === "en" ? en : mix;
-    if (input.recent.has(uniqKey(shown)) || input.recent.has(uniqKey(en))) continue;
+    if (input.recent.has(uniqKey(shown)) || input.recent.has(uniqKey(en)) || (input.recentTexts && nearDuplicate(en, input.recentTexts))) {
+      // Slot-free templates can't produce a different text — skip them; others may retry with new slots.
+      if (!/\{\w+\}/.test(line.en)) tried.add(template);
+      continue;
+    }
     return { en, de, mix, category, template };
   }
   return null;

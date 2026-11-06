@@ -10,6 +10,7 @@ export const DEFAULT_SIM: SimSettings = {
   liveReplies: false,
   breakCharacter: false,
   paused: false,
+  muted: [],
 };
 
 export interface Preset {
@@ -74,6 +75,7 @@ export function clampSettings(s: Partial<SimSettings>): SimSettings {
     liveReplies: !!s.liveReplies,
     breakCharacter: !!s.breakCharacter,
     paused: !!s.paused,
+    muted: Array.isArray(s.muted) ? s.muted.filter((id): id is string => typeof id === "string" && /^u_[a-z0-9_]+$/.test(id)).slice(0, 40) : [],
   };
 }
 

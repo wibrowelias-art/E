@@ -3,9 +3,13 @@ import { randomBytes } from "node:crypto";
 import { GUILDS } from "@/data/guilds";
 import { safetyCheck, SAFETY_MESSAGE } from "@/lib/safety";
 import { clampSettings, DEFAULT_SIM } from "@/lib/sim/settings";
-import type { Attachment, Message, Reaction, SimSettings, User } from "@/lib/types";
+import type { Attachment, Message, Reaction, SimSettings } from "@/lib/types";
 import type { Session } from "./auth";
 import { BUMP_REV, CURRENT_REV } from "./db";
+import { backstageLog, LOOKAHEAD_MS, scheduleReplies } from "./floor";
+import { rowToUser } from "./rows";
+
+export { rowToUser };
 
 export class ApiError extends Error {
   constructor(
@@ -40,26 +44,6 @@ function canPost(s: Session, channelId: string): boolean {
 
 const n = (v: unknown) => (v === null || v === undefined ? undefined : Number(v));
 const str = (v: unknown) => (v === null || v === undefined ? undefined : String(v));
-
-export function rowToUser(r: Row): User {
-  return {
-    id: String(r.id),
-    username: String(r.username),
-    displayName: String(r.display_name),
-    avatar: { from: String(r.avatar_from), to: String(r.avatar_to), initials: String(r.initials) },
-    roleId: String(r.role_id) as User["roleId"],
-    isNpc: Number(r.is_npc) === 1,
-    isBot: Number(r.is_bot) === 1 || undefined,
-    isHuman: Number(r.is_human) === 1 || undefined,
-    presence: String(r.presence) as User["presence"],
-    statusText: str(r.status_text),
-    statusEmoji: str(r.status_emoji),
-    voiceChannelId: str(r.voice_channel_id),
-    speaking: Number(r.speaking) === 1 || undefined,
-    selfMute: Number(r.self_mute) === 1 || undefined,
-    selfDeaf: Number(r.self_deaf) === 1 || undefined,
-  };
-}
 
 function rowToMessage(r: Row, reactions: Map<string, Reaction[]>): Message {
   const en = str(r.content_en);
@@ -128,21 +112,33 @@ export async function ensureGuest(c: Client, s: Session) {
   );
 }
 
+async function typingNow(c: Client, visible: string[], now: number) {
+  const q = visible.map(() => "?").join(",");
+  const r = await c.execute({
+    sql: `SELECT DISTINCT channel_id, author_id FROM messages
+          WHERE created_at > ? AND created_at <= ? AND typing_ms > 0 AND created_at - typing_ms <= ? AND channel_id IN (${q})`,
+    args: [now, now + LOOKAHEAD_MS + 3000, now, ...visible],
+  });
+  return r.rows.map((row) => ({ channelId: String(row.channel_id), userId: String(row.author_id) }));
+}
+
 export async function bootstrap(c: Client, s: Session) {
   await ensureGuest(c, s);
   const visible = visibleChannelIds(s);
   const q = visible.map(() => "?").join(",");
-  const [users, msgs, sim, rev] = await Promise.all([
+  const now = Date.now();
+  const [users, msgs, sim, rev, typing] = await Promise.all([
     c.execute("SELECT * FROM users WHERE is_human = 0 OR id = ? OR role_id = 'owner' OR rev > (SELECT value FROM meta WHERE key='rev') - 5000", [s.uid]),
     c.execute({
       sql: `SELECT * FROM (
               SELECT m.*, ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY created_at DESC) AS rn
-              FROM messages m WHERE channel_id IN (${q})
+              FROM messages m WHERE channel_id IN (${q}) AND created_at <= ?
             ) WHERE rn <= ${HISTORY_PER_CHANNEL} ORDER BY created_at ASC`,
-      args: visible,
+      args: [...visible, now],
     }),
     s.role === "owner" ? getSim(c) : Promise.resolve(null),
     currentRev(c),
+    typingNow(c, visible, now),
   ]);
   const reactions = await reactionsFor(c, msgs.rows.map((r) => String(r.id)), s.uid);
   return {
@@ -150,35 +146,63 @@ export async function bootstrap(c: Client, s: Session) {
     messages: msgs.rows.map((r) => rowToMessage(r, reactions)),
     sim,
     rev,
+    serverNow: now,
+    typing,
   };
 }
 
 export async function history(c: Client, s: Session, channelId: string, before: number, limit = 80) {
   if (!visibleChannelIds(s).includes(channelId)) throw new ApiError(403, "No access to this channel");
   const res = await c.execute({
-    sql: "SELECT * FROM messages WHERE channel_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?",
-    args: [channelId, before, Math.min(200, Math.max(1, limit))],
+    sql: "SELECT * FROM messages WHERE channel_id = ? AND created_at < ? AND created_at <= ? ORDER BY created_at DESC LIMIT ?",
+    args: [channelId, before, Date.now(), Math.min(200, Math.max(1, limit))],
   });
   const rows = res.rows.slice().reverse();
   const reactions = await reactionsFor(c, rows.map((r) => String(r.id)), s.uid);
   return { messages: rows.map((r) => rowToMessage(r, reactions)), hasMore: res.rows.length === Math.min(200, Math.max(1, limit)) };
 }
 
-export async function poll(c: Client, s: Session, since: number) {
+/**
+ * Changes since the client's cursors: `since` (revision) catches writes,
+ * `after` (server time of the previous poll) catches scheduled floor messages
+ * that were written earlier but only became visible now.
+ */
+export async function poll(c: Client, s: Session, since: number, after: number) {
   const visible = visibleChannelIds(s);
   const q = visible.map(() => "?").join(",");
-  const [msgs, users, rev] = await Promise.all([
-    c.execute({ sql: `SELECT * FROM messages WHERE rev > ? AND channel_id IN (${q}) ORDER BY rev ASC LIMIT 400`, args: [since, ...visible] }),
+  const now = Date.now();
+  const LIMIT = 400;
+  const [byRev, byTime, users, rev, typing] = await Promise.all([
+    // 1) everything written since the revision cursor (new, edited, reacted) that's visible
+    c.execute({
+      sql: `SELECT * FROM messages WHERE channel_id IN (${q}) AND rev > ? AND created_at <= ? ORDER BY rev ASC LIMIT ${LIMIT}`,
+      args: [...visible, since, now],
+    }),
+    // 2) scheduled floor lines written earlier that became visible since the last poll
+    c.execute({
+      sql: `SELECT * FROM messages WHERE channel_id IN (${q}) AND rev <= ? AND created_at > ? AND created_at <= ? ORDER BY created_at ASC LIMIT ${LIMIT}`,
+      args: [...visible, since, after || now, now],
+    }),
     c.execute({ sql: "SELECT * FROM users WHERE rev > ? ORDER BY rev ASC LIMIT 400", args: [since] }),
     currentRev(c),
+    typingNow(c, visible, now),
   ]);
-  const reactions = await reactionsFor(c, msgs.rows.map((r) => String(r.id)), s.uid);
-  // If we hit the limit, only advance the cursor as far as we actually read.
-  const lastMsgRev = msgs.rows.length === 400 ? Number(msgs.rows[msgs.rows.length - 1]!.rev) : rev;
+  const rows = [...byRev.rows, ...byTime.rows];
+  const reactions = await reactionsFor(c, rows.map((r) => String(r.id)), s.uid);
+  // A full page means more is waiting: advance only as far as we read. One write batch shares a
+  // revision, so step back one to re-read a partially read batch (duplicates merge by id).
+  let nextRev = rev;
+  if (byRev.rows.length === LIMIT) {
+    const last = Number(byRev.rows[LIMIT - 1]!.rev);
+    nextRev = last - 1 > since ? last - 1 : last;
+  }
+  const nextAfter = byTime.rows.length === LIMIT ? Number(byTime.rows[LIMIT - 1]!.created_at) : now;
   return {
-    messages: msgs.rows.map((r) => rowToMessage(r, reactions)),
+    messages: rows.map((r) => rowToMessage(r, reactions)).sort((a, b) => a.createdAt - b.createdAt),
     users: users.rows.map(rowToUser),
-    rev: Math.min(rev, lastMsgRev),
+    rev: nextRev,
+    serverNow: nextAfter,
+    typing,
   };
 }
 
@@ -237,7 +261,9 @@ export async function postHuman(c: Client, s: Session, body: { channelId?: unkno
     ],
     "write",
   );
-  return getMessage(c, id, s.uid);
+  const message = await getMessage(c, id, s.uid);
+  if (message) await scheduleReplies(c, message); // NPCs answer — even if nobody's browser is open
+  return message;
 }
 
 export async function editHuman(c: Client, s: Session, id: string, raw: unknown) {
@@ -273,65 +299,6 @@ export async function toggleHumanReaction(c: Client, s: Session, id: string, emo
   return getMessage(c, id, s.uid);
 }
 
-/* ───────── writes (simulator, owner session only) ───────── */
-
-interface SimBatch {
-  messages?: Message[];
-  reactions?: Array<{ messageId: string; emoji: string }>;
-  users?: Array<{ id: string; patch: Partial<User> }>;
-}
-
-export async function simBatch(c: Client, s: Session, body: SimBatch) {
-  if (s.role !== "owner") throw new ApiError(403, "Only the owner's floor writes simulator output.");
-  const npcRows = await c.execute("SELECT id FROM users WHERE is_npc = 1");
-  const npcs = new Set(npcRows.rows.map((r) => String(r.id)));
-  const stmts: InStatement[] = [BUMP_REV];
-  let accepted = 0;
-  for (const m of (body.messages ?? []).slice(0, 100)) {
-    // NPCs never post as a human or the bot, never in staff channels, always pass the safety filter.
-    if (!npcs.has(m.authorId) || !TEXT_CHANNELS.some((ch) => ch.id === m.channelId && !ch.staffOnly)) continue;
-    if (typeof m.content !== "string" || !m.content.trim() || m.content.length > MAX_LEN || !/^m_sim_[\w-]+$/.test(m.id)) continue;
-    const texts = [m.content, m.i18n?.en, m.i18n?.de].filter((t): t is string => typeof t === "string");
-    if (texts.some((t) => !safetyCheck(t).ok)) continue;
-    stmts.push({
-      sql: `INSERT OR IGNORE INTO messages (id, channel_id, author_id, content, content_en, content_de, created_at, reply_to_id, is_human, sim_tag, rev)
-            VALUES (?,?,?,?,?,?,?,?,0,?,${CURRENT_REV})`,
-      args: [m.id, m.channelId, m.authorId, m.content, m.i18n?.en ?? null, m.i18n?.de ?? null, Math.min(Date.now(), Number(m.createdAt) || Date.now()), m.replyToId ?? null, m.simTag ?? null],
-    });
-    accepted++;
-  }
-  for (const r of (body.reactions ?? []).slice(0, 200)) {
-    if (typeof r.emoji !== "string" || !EMOJI_OK.test(r.emoji)) continue;
-    stmts.push({
-      sql: "INSERT INTO reactions (message_id, emoji, npc_count) SELECT ?, ?, 1 WHERE EXISTS (SELECT 1 FROM messages WHERE id = ?) ON CONFLICT(message_id, emoji) DO UPDATE SET npc_count = npc_count + 1",
-      args: [r.messageId, r.emoji, r.messageId],
-    });
-    stmts.push({ sql: `UPDATE messages SET rev = ${CURRENT_REV} WHERE id = ?`, args: [r.messageId] });
-  }
-  for (const u of (body.users ?? []).slice(0, 100)) {
-    if (!npcs.has(u.id)) continue;
-    const p = u.patch ?? {};
-    const presence = ["online", "idle", "dnd", "offline"].includes(String(p.presence)) ? String(p.presence) : null;
-    stmts.push({
-      sql: `UPDATE users SET
-              presence = COALESCE(?, presence),
-              voice_channel_id = CASE WHEN ? THEN ? ELSE voice_channel_id END,
-              speaking = COALESCE(?, speaking),
-              rev = ${CURRENT_REV}
-            WHERE id = ?`,
-      args: [
-        presence,
-        "voiceChannelId" in p ? 1 : 0,
-        "voiceChannelId" in p ? (p.voiceChannelId ?? null) : null,
-        "speaking" in p ? (p.speaking ? 1 : 0) : null,
-        u.id,
-      ],
-    });
-  }
-  if (stmts.length > 1) await c.batch(stmts, "write");
-  return { accepted };
-}
-
 /* ───────── Backstage settings ───────── */
 
 export async function getSim(c: Client): Promise<SimSettings> {
@@ -342,10 +309,26 @@ export async function getSim(c: Client): Promise<SimSettings> {
 
 export async function putSim(c: Client, s: Session, body: unknown): Promise<SimSettings> {
   if (s.role !== "owner") throw new ApiError(403, "Backstage is owner-only.");
-  const settings = clampSettings({ ...(await getSim(c)), ...(body as Partial<SimSettings>) });
-  await c.execute({
-    sql: "INSERT INTO sim_state (id, settings_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at",
-    args: [JSON.stringify(settings), Date.now()],
-  });
+  const before = await getSim(c);
+  const settings = clampSettings({ ...before, ...(body as Partial<SimSettings>) });
+  const now = Date.now();
+  const stmts: InStatement[] = [
+    BUMP_REV,
+    {
+      sql: "INSERT INTO sim_state (id, settings_json, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at",
+      args: [JSON.stringify(settings), now],
+    },
+  ];
+  // Pause / mute take effect immediately: drop lines that are scheduled but not visible yet.
+  if (!before.paused && settings.paused) {
+    stmts.push({ sql: "DELETE FROM messages WHERE id LIKE 'm_sim_%' AND created_at > ?", args: [now] });
+  }
+  for (const id of (settings.muted ?? []).filter((m) => !(before.muted ?? []).includes(m))) {
+    stmts.push({ sql: "DELETE FROM messages WHERE id LIKE 'm_sim_%' AND author_id = ? AND created_at > ?", args: [id, now] });
+  }
+  const users = await c.execute("SELECT * FROM users WHERE is_npc = 1");
+  const log = backstageLog(before, settings, new Map(users.rows.map((r) => [String(r.id), rowToUser(r)])), now);
+  if (log) stmts.push(log);
+  await c.batch(stmts, "write");
   return settings;
 }

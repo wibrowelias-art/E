@@ -94,7 +94,7 @@ export function useSimulation(enabled: boolean) {
       timers.add(t);
     };
     const S = () => useLounge.getState();
-    const npcIds = () => Object.values(S().users).filter((u) => u.isNpc);
+    const npcIds = () => Object.values(S().users).filter((u) => u.isNpc && !(S().sim.muted ?? []).includes(u.id));
     const recentTemplates: string[] = [];
 
     const channelMessages = (channelId: string, n: number) => {
@@ -159,7 +159,8 @@ export function useSimulation(enabled: boolean) {
         replyToName,
         otherNames: npcIds().map((u) => u.displayName),
         recent: recentKeys(),
-        avoid: new Set(recentTemplates),
+        avoid: recentTemplates,
+        recentTexts: S().messages.slice(-150).map((m) => m.i18n?.en ?? m.content),
         rng,
       });
       if (c) {

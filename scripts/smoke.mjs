@@ -30,6 +30,9 @@ try {
   await page.click(".auth__primary");
   await page.waitForURL((u) => u.pathname === "/", { timeout: 15000 });
   ok(true, "owner signs in through the form");
+  // The server floor would post into the channels under test — pause it for the UI checks.
+  await ownerCtx.request.put(`${BASE}/api/sim/settings`, { data: { paused: true } });
+  await page.waitForTimeout(13_000); // let already-scheduled lines (12s lookahead) land
   await page.goto(`${BASE}/channels/lounge/general?sim=off&lang=en`, { waitUntil: "networkidle" });
   await page.waitForSelector(".msg");
   ok(await page.locator(".skel").count() === 0, "skeleton replaced by messages after hydration");
@@ -80,6 +83,9 @@ try {
   ok((await page.locator(".popout").count()) === 0, "Esc closes popout");
 
   // Language switch: gear → Deutsch → UI + backlog switch, back to English.
+  // (checked on the fixed local backlog — the live database history keeps moving)
+  await page.goto(`${BASE}/channels/lounge/hamburg-night?sim=off&lang=en&local=1`, { waitUntil: "networkidle" });
+  await page.waitForSelector(".msg");
   await page.locator(".upanel .iconbtn").last().click();
   await page.locator(".smenu__item", { hasText: "Deutsch" }).click();
   await page.waitForTimeout(200);
@@ -110,7 +116,7 @@ try {
   await g.fill(".auth__guest input", "Smoke Guest");
   await g.click(".auth__secondary");
   await g.waitForURL((u) => u.pathname === "/", { timeout: 15000 });
-  await g.goto(`${BASE}/channels/lounge/general?sim=off&lang=en`, { waitUntil: "networkidle" });
+  await g.goto(`${BASE}/channels/lounge/general?sim=off&lang=en&debug`, { waitUntil: "networkidle" });
   await g.waitForSelector(".msg");
   ok(await g.locator(".composer__readonly").isVisible(), "guest: #general composer is read-only");
   ok((await g.locator('.titlebar [aria-label="Backstage"]').count()) === 0, "guest: no Backstage button");
@@ -123,18 +129,25 @@ try {
   await g.waitForFunction(() => !document.querySelector(".msg[data-pending]") && !document.querySelector(".msg[data-failed]"), null, { timeout: 10000 });
   ok(true, "guest: can post in #introductions");
 
-  // Shared floor: the owner's browser runs the sim, the guest receives it via the database poll.
-  const floor = await ownerCtx.newPage();
-  await floor.goto(`${BASE}/channels/lounge/general?lang=en`, { waitUntil: "networkidle" });
-  const msgsBefore = await g.evaluate(() => document.querySelectorAll(".msg").length);
+  // Phase 3: the floor runs on the server — no owner page open, the guest still sees it move.
+  await page.close();
+  await ownerCtx.request.put(`${BASE}/api/sim/settings`, { data: { paused: false, activity: 2 } });
   await g.locator(".chanrow", { hasText: "general" }).first().click();
-  let synced = false;
-  for (let i = 0; i < 20 && !synced; i++) {
-    await g.waitForTimeout(1000);
-    synced = (await g.locator('[id^="msg-m_sim_"]').count()) > 0;
+  await g.waitForTimeout(500);
+  await ownerCtx.request.post(`${BASE}/api/sim/burst`, { data: { channelId: "c_general" } });
+  const floorCount = () =>
+    g.evaluate(() => window.__lounge.getState().messages.filter((m) => m.id.startsWith("m_sim_") && m.channelId === "c_general").length);
+  const startCount = await floorCount();
+  let arrived = 0;
+  let sawTyping = false;
+  for (let i = 0; i < 50 && (arrived < 2 || !sawTyping); i++) {
+    await g.waitForTimeout(400);
+    arrived = (await floorCount()) - startCount;
+    sawTyping ||= (await g.locator(".typing b").count()) > 0;
   }
-  ok(synced, `guest receives NPC messages from the owner's floor via the server (had ${msgsBefore} messages)`);
-  await floor.close();
+  ok(arrived >= 2, `guest watches the server floor live with no owner online (+${arrived} NPC messages)`);
+  ok(sawTyping, "guest sees typing indicators from the server floor");
+  await ownerCtx.request.put(`${BASE}/api/sim/settings`, { data: { activity: 1 } });
 
   const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await loginOwner(mctx, BASE);

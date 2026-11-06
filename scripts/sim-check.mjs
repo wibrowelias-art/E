@@ -115,8 +115,8 @@ try {
   ok(neg(hate) > 0.15 && pos(hate) === 0, `glaze 0%: ${Math.round(neg(hate) * 100)}% roast/critical, ${Math.round(pos(hate) * 100)}% praise`);
   ok(pos(worship) > 0.15 && neg(worship) === 0, `glaze 100%: ${Math.round(pos(worship) * 100)}% worship/praise, ${Math.round(neg(worship) * 100)}% roast`);
 
-  const calm = await run({ drama: 0 });
-  const messy = await run({ drama: 100 });
+  const calm = await run({ drama: 0 }, 300_000);
+  const messy = await run({ drama: 100 }, 300_000);
   ok(share(messy, ["drama", "disagree"]) > share(calm, ["drama", "disagree"]) * 3, `drama: ${Math.round(share(calm, ["drama", "disagree"]) * 100)}% at 0 → ${Math.round(share(messy, ["drama", "disagree"]) * 100)}% at 100`);
 
   const prompted = await run({ prompt: "Talk about the rooftop party on Friday and vintage cameras. Be hyped." });

@@ -4,6 +4,7 @@
  */
 import { db, databaseUrl, resetDatabase } from "../src/server/db";
 
+async function main() {
 const cmd = process.argv[2] ?? "status";
 const c = await db();
 if (!c) {
@@ -19,3 +20,6 @@ for (const t of ["users", "messages", "reactions", "reaction_users", "channels",
   console.log(`${t.padEnd(16)} ${r.rows[0]?.n}`);
 }
 c.close();
+}
+
+void main();

@@ -40,6 +40,9 @@ const COPY = {
     running: "Floor is live",
     runningDesc: "NPCs keep posting, reacting, typing and hopping in and out of voice. Off: everything freezes.",
     burst: (c: string) => `Start a burst in #${c}`,
+    mute: "Mute NPCs",
+    muteHelp: "Muted members stop posting and reacting. Tap again to bring them back.",
+    mutedCount: (n: number) => `${n} muted`,
     language: "Language",
     feed: "Live feed",
     feedEmpty: "Nothing yet — the first lines appear within a few seconds.",
@@ -77,6 +80,9 @@ const COPY = {
     running: "Floor ist live",
     runningDesc: "NPCs posten, reagieren, tippen und springen in Sprachkanäle. Aus: alles friert ein.",
     burst: (c: string) => `Welle in #${c} starten`,
+    mute: "NPCs stummschalten",
+    muteHelp: "Stummgeschaltete schreiben und reagieren nicht mehr. Nochmal tippen holt sie zurück.",
+    mutedCount: (n: number) => `${n} stumm`,
     language: "Sprache",
     feed: "Live-Feed",
     feedEmpty: "Noch nichts — die ersten Nachrichten kommen in ein paar Sekunden.",
@@ -167,6 +173,9 @@ export function Backstage() {
   if (!open) return null;
 
   const channels = GUILDS.flatMap((g) => g.channels);
+  const npcs = Object.values(users)
+    .filter((u) => u.isNpc)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
   const channelName = channels.find((x) => x.id === channelId)?.name ?? "general";
   const tones = Object.entries(parsed.tone)
     .filter(([, on]) => on)
@@ -184,8 +193,8 @@ export function Backstage() {
                 <i />
                 {persistence
                   ? lang === "de"
-                    ? "Datenbank verbunden — Nachrichten und Einstellungen werden gespeichert und mit Gästen geteilt."
-                    : "Database connected — messages and settings are saved and shared with guests."
+                    ? "Datenbank verbunden — der Floor läuft auf dem Server weiter, auch wenn niemand online ist."
+                    : "Database connected — the floor runs on the server and keeps going while you're away."
                   : lang === "de"
                     ? `Lokaler Modus — nichts wird gespeichert. ${persistenceNote ?? ""}`
                     : `Local mode — nothing is saved. ${persistenceNote ?? ""}`}
@@ -257,6 +266,31 @@ export function Backstage() {
             <button className="bs-button" onClick={requestBurst} disabled={sim.paused}>
               {c.burst(channelName)}
             </button>
+          </section>
+
+          <section className="bs-card">
+            <h2 className="bs-card__title">
+              {c.mute}
+              {!!sim.muted?.length && <span className="bs-card__count">{c.mutedCount(sim.muted.length)}</span>}
+            </h2>
+            <div className="bs-mutes">
+              {npcs.map((u) => {
+                const muted = (sim.muted ?? []).includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    className="bs-mute"
+                    data-muted={muted}
+                    aria-pressed={muted}
+                    onClick={() => setSim({ muted: muted ? (sim.muted ?? []).filter((id) => id !== u.id) : [...(sim.muted ?? []), u.id] })}
+                  >
+                    <i style={{ background: `linear-gradient(135deg, ${u.avatar.from}, ${u.avatar.to})` }}>{u.avatar.initials}</i>
+                    {u.displayName}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="bs-help">{c.muteHelp}</p>
           </section>
 
           <section className="bs-card">

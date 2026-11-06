@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { GUILD_SLUG_BY_ID, GUILD_SLUGS, GUILDS } from "@/data/guilds";
 import { api } from "@/lib/api";
 import { useSimulation } from "@/lib/sim/engine";
-import { enableSimSync } from "@/lib/sync";
+import type { TypingEntry } from "@/lib/store";
 import type { Message, User } from "@/lib/types";
 import { useCurrentGuild, useLounge, type MobilePane } from "@/lib/store";
 import { Backstage } from "./Backstage";
@@ -69,8 +69,10 @@ function usePoller(enabled: boolean) {
     const tick = async () => {
       const st = useLounge.getState();
       try {
-        const res = await api<{ messages: Message[]; users: User[]; rev: number }>(`/api/poll?since=${st.rev}`);
-        if (!stopped && (res.messages.length || res.users.length || res.rev !== st.rev)) st.mergeServer(res.messages, res.users, res.rev);
+        const res = await api<{ messages: Message[]; users: User[]; rev: number; serverNow: number; typing: TypingEntry[] }>(
+          `/api/poll?since=${st.rev}&after=${st.serverNow}`,
+        );
+        if (!stopped) st.mergeServer(res.messages, res.users, res.rev, res.serverNow, res.typing);
       } catch {
         /* transient — try again on the next tick */
       }
@@ -85,9 +87,8 @@ function usePoller(enabled: boolean) {
 }
 
 /**
- * Who runs the floor: in local mode every browser runs its own; with a database
- * only the owner's browser does (and only one tab, via the Web Locks API) and
- * its output is synced to the server for everyone else.
+ * Local mode only: without a database each browser runs its own floor (one tab,
+ * via the Web Locks API). With a database the server runs the floor (Phase 3).
  */
 function useFloorRunner(wanted: boolean, shared: boolean) {
   const [holder, setHolder] = useState(false);
@@ -111,10 +112,6 @@ function useFloorRunner(wanted: boolean, shared: boolean) {
       setHolder(false);
     };
   }, [wanted, shared]);
-  useEffect(() => {
-    enableSimSync(holder && shared);
-    return () => enableSimSync(false);
-  }, [holder, shared]);
   return holder;
 }
 
@@ -129,7 +126,7 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
   const [frame, setFrame] = useState<string | undefined>();
   const [simOn, setSimOn] = useState(false);
   usePoller(ready && persistence);
-  const runsFloor = useFloorRunner(ready && simOn && !fixture && (!persistence || role === "owner"), persistence);
+  const runsFloor = useFloorRunner(ready && simOn && !fixture && !persistence, false);
   useSimulation(runsFloor);
 
   // Hydrate client-side only: timestamps are relative to the visitor's clock.

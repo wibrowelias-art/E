@@ -13,6 +13,11 @@ export const env = { ...loadEnv(), ...process.env };
 export const OWNER = { email: env.LOUNGE_OWNER_EMAIL, password: env.LOUNGE_OWNER_PASSWORD };
 /** Log a Playwright context in as the owner (cookies stay in the context). */
 export async function loginOwner(ctx, base) {
-  const res = await ctx.request.post(`${base}/api/auth/login`, { data: OWNER });
-  if (!res.ok()) throw new Error(`owner login failed: ${res.status()} ${await res.text()}`);
+  // `next dev` compiles routes on demand and can 500 while a manifest is being written — retry.
+  for (let attempt = 0; ; attempt++) {
+    const res = await ctx.request.post(`${base}/api/auth/login`, { data: OWNER });
+    if (res.ok()) return;
+    if (res.status() !== 500 || attempt >= 4) throw new Error(`owner login failed: ${res.status()}`);
+    await new Promise((r) => setTimeout(r, 800));
+  }
 }
