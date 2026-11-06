@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useLounge } from "@/lib/store";
+import { useLounge, useT } from "@/lib/store";
 import { Avatar } from "./Avatar";
 import { GearIcon, HeadphonesIcon, HeadphonesOffIcon, MicIcon, MicOffIcon } from "./icons";
 
@@ -9,6 +9,8 @@ import { GearIcon, HeadphonesIcon, HeadphonesOffIcon, MicIcon, MicOffIcon } from
 export function UserPanel() {
   const viewer = useLounge((s) => s.users[s.viewerId]);
   const openProfile = useLounge((s) => s.openProfile);
+  const openSettingsMenu = useLounge((s) => s.openSettingsMenu);
+  const t = useT();
   const [muted, setMuted] = useState(false);
   const [deaf, setDeaf] = useState(false);
   if (!viewer) return <div className="upanel" />;
@@ -20,7 +22,7 @@ export function UserPanel() {
           <div className="upanel__name truncate">{viewer.displayName}</div>
           <div className="upanel__status">
             {viewer.statusEmoji ? `${viewer.statusEmoji} ` : ""}
-            {viewer.statusText ?? "Online"}
+            {viewer.statusText ?? t.presence.online}
           </div>
         </span>
       </button>
@@ -30,7 +32,15 @@ export function UserPanel() {
       <button className="iconbtn" onClick={() => setDeaf((d) => !d)} aria-label={deaf ? "Undeafen" : "Deafen"} aria-pressed={deaf}>
         {deaf ? <HeadphonesOffIcon size={20} /> : <HeadphonesIcon size={20} />}
       </button>
-      <button className="iconbtn" aria-label="User settings">
+      <button
+        className="iconbtn"
+        aria-label={t.settings}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          openSettingsMenu({ x: r.left, y: r.top, mobile: false });
+        }}
+      >
         <GearIcon size={20} />
       </button>
     </div>

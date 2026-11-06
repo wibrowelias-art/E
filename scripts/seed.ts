@@ -5,9 +5,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { GUILDS } from "../src/data/guilds";
 import { NPC_PROFILES, ROLES } from "../src/data/npcs";
-import { buildSeed, validateSeed } from "../src/data/seed";
+import { buildSeed, validateBanks, validateSeed } from "../src/data/seed";
+import { BANKS, SLOTS } from "../src/lib/sim/banks";
 
-const errors = validateSeed();
+const errors = [...validateSeed(), ...validateBanks(BANKS, SLOTS)];
 if (errors.length) {
   console.error("Seed validation failed:\n- " + errors.join("\n- "));
   process.exit(1);
@@ -23,4 +24,6 @@ const eliasRefs = snap.messages.filter((m) => /elias|lounge|imageforge|spotly/i.
 console.log(`✓ ${GUILDS.length} guilds, ${GUILDS.reduce((n, g) => n + g.channels.length, 0)} channels`);
 console.log(`✓ ${npcs} NPCs (ages ${Math.min(...NPC_PROFILES.map((p) => p.age))}–${Math.max(...NPC_PROFILES.map((p) => p.age))})`);
 console.log(`✓ ${snap.messages.length} backlog messages, all unique; ${eliasRefs} reference Elias / The Lounge / his apps (${Math.round((eliasRefs / snap.messages.length) * 100)}%)`);
+const bankLines = Object.values(BANKS).reduce((n, l) => n + l.length, 0);
+console.log(`✓ stub brain: ${bankLines} phrase templates × 2 languages, slots consistent, English lines contain no German`);
 console.log("→ wrote data/seed.json");

@@ -112,7 +112,7 @@ const NPC_SEEDS: NpcSeed[] = [
   {
     id: "u_finn", username: "finnforreal", displayName: "Finn", grad: ["#5ee7ff", "#3b6cff"], roleId: "tourist", presence: "online",
     profile: {
-      age: 22, city: "Hamburg", district: "zugezogen aus Kiel",
+      age: 22, city: "Hamburg", district: "moved from Kiel",
       bio: "First-year student, came in through a friend's invite and never left. Meme reflexes faster than his train.",
       traits: ["chaotic", "eager", "funny"], quirks: ["double exclamation marks", "typos when hyped"],
       topics: ["memes", "uni", "deutsche bahn", "being new in town"], eliasOpinion: "fan", activity: "evening", germanRatio: 0.8,
@@ -240,7 +240,7 @@ const NPC_SEEDS: NpcSeed[] = [
   },
   {
     id: "u_lukas", username: "lux", displayName: "Lukas", grad: ["#1e3c72", "#2a5298"], roleId: "regular", presence: "online",
-    statusText: "nur der HSV",
+    statusText: "HSV till I die",
     profile: {
       age: 28, city: "Hamburg", district: "Stellingen",
       bio: "Season ticket holder, suffers accordingly. Every conversation ends up at the Volkspark.",
@@ -283,7 +283,7 @@ const NPC_SEEDS: NpcSeed[] = [
   },
   {
     id: "u_daniel", username: "dnl", displayName: "Daniel", grad: ["#14f195", "#9945ff"], roleId: "regular", presence: "idle",
-    statusText: "wagmi (ironisch)",
+    statusText: "wagmi (ironically)",
     profile: {
       age: 31, city: "Berlin", district: "Friedrichshain",
       bio: "Ex-crypto bro, now ironic crypto bro. Suggests putting everything on a blockchain, mostly as a bit.",

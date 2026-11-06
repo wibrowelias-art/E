@@ -6,7 +6,7 @@ import { fixtureMessages } from "@/data/fixture";
 import { ALL_USERS } from "@/data/npcs";
 import { dividerDate, GROUP_WINDOW_MS, startOfDay } from "@/lib/format";
 import { mentionsUser, type MarkupContext } from "@/lib/markup";
-import { useCurrentChannel, useCurrentGuild, useLounge } from "@/lib/store";
+import { messageText, useCurrentChannel, useCurrentGuild, useLounge, useT } from "@/lib/store";
 import type { Message } from "@/lib/types";
 import { HashIcon } from "./icons";
 import { MessageRow } from "./MessageRow";
@@ -59,14 +59,18 @@ function ListFooter() {
 
 function ChannelStart() {
   const channel = useCurrentChannel();
+  const t = useT();
+  const start = t.startOf(channel.name);
   return (
     <div className="chan-start">
       <div className="chan-start__icon">
         <HashIcon size={42} strokeWidth={2.6} />
       </div>
-      <h1 className="chan-start__title">Welcome to #{channel.name}!</h1>
+      <h1 className="chan-start__title">{t.welcome(channel.name)}</h1>
       <p className="chan-start__sub">
-        This is the start of the <b>#{channel.name}</b> channel. {channel.topic}
+        {start[0]}
+        <b>{start[1]}</b>
+        {start[2]} {channel.topic}
       </p>
     </div>
   );
@@ -93,6 +97,8 @@ function MessageListInner({ channelId }: { channelId: string }) {
   const toggleReaction = useLounge((s) => s.toggleReaction);
   const openProfile = useLounge((s) => s.openProfile);
   const selectChannel = useLounge((s) => s.selectChannel);
+  const lang = useLounge((s) => s.lang);
+  const t = useT();
 
   const fixture = useLounge((s) => s.fixture);
   const messages = useMemo(
@@ -193,7 +199,7 @@ function MessageListInner({ channelId }: { channelId: string }) {
       >
         {stickyDay && (
           <div className="datesep datesep--sticky">
-            <span>{dividerDate(stickyDay)}</span>
+            <span>{dividerDate(stickyDay, lang)}</span>
           </div>
         )}
       </div>
@@ -223,7 +229,7 @@ function MessageListInner({ channelId }: { channelId: string }) {
           if (r.kind === "sep") {
             return (
               <div className={`datesep ${index === 1 ? "datesep--first" : ""}`} role="separator">
-                <span>{dividerDate(r.day)}</span>
+                <span>{dividerDate(r.day, lang)}</span>
               </div>
             );
           }
@@ -232,6 +238,7 @@ function MessageListInner({ channelId }: { channelId: string }) {
           if (!author) return <div style={{ height: 1 }} />;
           const parent = m.replyToId ? byId.get(m.replyToId) : undefined;
           const parentAuthor = parent ? users[parent.authorId] : undefined;
+          const text = messageText(m, lang);
           return (
             <MessageRow
               message={m}
@@ -239,8 +246,12 @@ function MessageListInner({ channelId }: { channelId: string }) {
               groupStart={r.groupStart}
               replyTo={parent && parentAuthor ? { message: parent, author: parentAuthor } : null}
               now={now}
+              lang={lang}
+              t={t}
+              text={text}
+              replyText={parent ? messageText(parent, lang) : undefined}
               viewerId={viewerId}
-              mentioned={!!viewer && m.authorId !== viewerId && mentionsUser(m.content, viewer)}
+              mentioned={!!viewer && m.authorId !== viewerId && mentionsUser(text, viewer)}
               editing={editingId === m.id}
               replying={replyingToId === m.id}
               markup={markup}
@@ -256,8 +267,8 @@ function MessageListInner({ channelId }: { channelId: string }) {
       />
       {!atBottom && !pinned.current && (
         <button className="jump-bar" onClick={() => ref.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" })}>
-          <span>You&apos;re viewing older messages</span>
-          <span>Jump to present ↓</span>
+          <span>{t.olderMessages}</span>
+          <span>{t.jumpToPresent} ↓</span>
         </button>
       )}
     </div>

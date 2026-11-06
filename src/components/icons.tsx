@@ -300,3 +300,25 @@ export const SendIcon = ({ size = 24, ...p }: P) => (
     <path d="M3.4 4.2c-.3-.9.6-1.7 1.5-1.3l15.9 8c.8.4.8 1.6 0 2l-15.9 8c-.9.4-1.8-.4-1.5-1.3L5.9 12 3.4 4.2Zm3.7 6.6h6.4a1.2 1.2 0 1 1 0 2.4H7.1L6.2 16l11-4L6.2 8l.9 2.8Z" fill="currentColor" fillRule="evenodd" />
   </svg>
 );
+
+export const SlidersIcon = ({ size = 20, ...p }: P) => (
+  <svg {...base(size, p)}>
+    <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" {...stroke} />
+    <circle cx="15" cy="6" r="2.2" {...stroke} />
+    <circle cx="9" cy="12" r="2.2" {...stroke} />
+    <circle cx="17" cy="18" r="2.2" {...stroke} />
+  </svg>
+);
+
+export const GlobeIcon = ({ size = 20, ...p }: P) => (
+  <svg {...base(size, p)}>
+    <circle cx="12" cy="12" r="9" {...stroke} />
+    <path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z" {...stroke} />
+  </svg>
+);
+
+export const CheckIcon = ({ size = 16, ...p }: P) => (
+  <svg {...base(size, p)}>
+    <path d="m5 12.5 4.5 4.5L19 7.5" {...stroke} strokeWidth={2.6} />
+  </svg>
+);

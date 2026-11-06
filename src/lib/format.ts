@@ -1,4 +1,5 @@
-/* Time + grouping helpers (24h, Hamburg style). */
+/* Time + grouping helpers. Locale follows the UI language (en-US / de-DE). */
+import { STRINGS, type Lang } from "./i18n";
 
 const pad = (n: number) => n.toString().padStart(2, "0");
 
@@ -8,47 +9,43 @@ export function startOfDay(ms: number): number {
   return d.getTime();
 }
 
-/** Locale-aware short time: "16:40" (de) / "4:40 PM" (en-US), like the reference. */
-export function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
-/** Mobile header time: today → time only (reference), otherwise "Yesterday at …" / date. */
-export function shortHeaderTime(ms: number, now: number): string {
-  const diff = dayDiff(ms, now);
-  if (diff === 0) return clock(ms);
-  return headerTime(ms, now);
-}
-
 export function dayDiff(ms: number, now: number): number {
   return Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
 }
 
-/** Header timestamp next to a name: "Today at 16:02", "Yesterday at 23:41", "03/11/2026 14:00" */
-export function headerTime(ms: number, now: number): string {
+/** Short time: "4:40 PM" (en, like the reference) / "16:40" (de). */
+export function clock(ms: number, lang: Lang = "en"): string {
+  return new Date(ms).toLocaleTimeString(STRINGS[lang].locale, { hour: "numeric", minute: "2-digit" });
+}
+
+/** Desktop header: "Today at 4:40 PM", "Yesterday at …", "03/11/2026 4:40 PM" */
+export function headerTime(ms: number, now: number, lang: Lang = "en"): string {
+  const t = STRINGS[lang];
   const diff = dayDiff(ms, now);
-  if (diff === 0) return `Today at ${clock(ms)}`;
-  if (diff === 1) return `Yesterday at ${clock(ms)}`;
+  if (diff === 0) return `${t.today} ${clock(ms, lang)}`;
+  if (diff === 1) return `${t.yesterday} ${clock(ms, lang)}`;
   const d = new Date(ms);
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${clock(ms)}`;
+  const date = lang === "de" ? `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}` : `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
+  return `${date} ${clock(ms, lang)}`;
 }
 
-export function fullDate(ms: number): string {
-  return new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+/** Mobile header (reference): today → time only, otherwise like desktop. */
+export function shortHeaderTime(ms: number, now: number, lang: Lang = "en"): string {
+  return dayDiff(ms, now) === 0 ? clock(ms, lang) : headerTime(ms, now, lang);
 }
 
-/** Date divider label: "6 November 2026" (Discord shows the full date). */
-export function dividerDate(ms: number): string {
-  return fullDate(ms);
+/** Date divider: "November 6, 2026" / "6. November 2026" */
+export function dividerDate(ms: number, lang: Lang = "en"): string {
+  return new Date(ms).toLocaleDateString(STRINGS[lang].locale, { day: "numeric", month: "long", year: "numeric" });
 }
 
-export function fullTimestamp(ms: number): string {
-  return new Date(ms).toLocaleString("en-GB", {
+export function fullTimestamp(ms: number, lang: Lang = "en"): string {
+  return new Date(ms).toLocaleString(STRINGS[lang].locale, {
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
   });
 }

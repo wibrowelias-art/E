@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { useCurrentChannel, useLounge } from "@/lib/store";
+import { useCurrentChannel, useLounge, useT } from "@/lib/store";
+import type { Strings } from "@/lib/i18n";
 import {
   ArrowLeft,
   BellIcon,
@@ -23,12 +24,12 @@ import {
 import { MemberList } from "./MemberList";
 import { MessageList } from "./MessageList";
 
-export function typingLabel(names: string[]): { bold: string[]; rest: string } | null {
+export function typingLabel(names: string[], t: Strings): { bold: string[]; rest: string } | null {
   if (!names.length) return null;
-  if (names.length === 1) return { bold: [names[0]!], rest: " is typing…" };
-  if (names.length === 2) return { bold: [names[0]!, names[1]!], rest: " are typing…" };
-  if (names.length <= 4) return { bold: [names[0]!], rest: ` and ${names.length - 1} others are typing…` };
-  return { bold: [], rest: "Several people are typing…" };
+  if (names.length === 1) return { bold: [names[0]!], rest: t.typing1 };
+  if (names.length === 2) return { bold: [names[0]!, names[1]!], rest: t.typing2 };
+  if (names.length <= 4) return { bold: [names[0]!], rest: t.typingN(names.length - 1) };
+  return { bold: [], rest: t.typingMany };
 }
 
 const NOBODY: string[] = [];
@@ -37,7 +38,8 @@ function Typing() {
   const channel = useCurrentChannel();
   const typing = useLounge((s) => s.typing[channel.id] ?? NOBODY);
   const users = useLounge((s) => s.users);
-  const label = typingLabel(typing.map((id) => users[id]?.displayName ?? "Someone"));
+  const t = useT();
+  const label = typingLabel(typing.map((id) => users[id]?.displayName ?? "Someone"), t);
   return (
     <div className="typing" aria-live="polite">
       {label && (
@@ -50,7 +52,7 @@ function Typing() {
           <span className="truncate">
             {label.bold.map((n, i) => (
               <span key={n}>
-                {i > 0 && " and "}
+                {i > 0 && t.and}
                 <b>{n}</b>
               </span>
             ))}
@@ -91,7 +93,8 @@ function useComposer() {
       setReplyingTo(null);
     }
   };
-  return { channel, value, setValue, onKeyDown };
+  const t = useT();
+  return { channel, value, setValue, onKeyDown, t };
 }
 
 function useAutosize(value: string) {
@@ -110,11 +113,12 @@ function ReplyBanner() {
   const msg = useLounge((s) => (replyingToId ? s.messages.find((m) => m.id === replyingToId) : undefined));
   const author = useLounge((s) => (msg ? s.users[msg.authorId] : undefined));
   const setReplyingTo = useLounge((s) => s.setReplyingTo);
+  const t = useT();
   if (!msg || !author) return null;
   return (
     <div className="composer__reply">
       <span className="flex-1 truncate">
-        Replying to <b>{author.displayName}</b>
+        {t.replyingTo} <b>{author.displayName}</b>
       </span>
       <button className="iconbtn" style={{ width: 24, height: 24 }} onClick={() => setReplyingTo(null)} aria-label="Cancel reply">
         <CloseIcon size={16} />
@@ -145,8 +149,8 @@ function DesktopComposer({ c }: { c: ReturnType<typeof useComposer> }) {
           ref={ref}
           rows={1}
           className="composer__input scroll-thin"
-          placeholder={`Message #${c.channel.name}`}
-          aria-label={`Message #${c.channel.name}`}
+          placeholder={c.t.messagePlaceholder(c.channel.name)}
+          aria-label={c.t.messagePlaceholder(c.channel.name)}
           value={c.value}
           onChange={(e) => c.setValue(e.target.value)}
           onKeyDown={c.onKeyDown}
@@ -186,8 +190,8 @@ function MobileComposer({ c }: { c: ReturnType<typeof useComposer> }) {
           ref={ref}
           rows={1}
           className="mcomposer__input scroll-none"
-          placeholder={`Message #${c.channel.name}`}
-          aria-label={`Message #${c.channel.name}`}
+          placeholder={c.t.messagePlaceholder(c.channel.name)}
+          aria-label={c.t.messagePlaceholder(c.channel.name)}
           value={c.value}
           onChange={(e) => c.setValue(e.target.value)}
           onKeyDown={c.onKeyDown}
@@ -221,6 +225,7 @@ function DesktopHeader() {
   const channel = useCurrentChannel();
   const membersOpen = useLounge((s) => s.membersOpen);
   const toggleMembers = useLounge((s) => s.toggleMembers);
+  const t = useT();
   const Icon = channel.staffOnly ? LockIcon : HashIcon;
   return (
     <header className="chat-head">
@@ -256,7 +261,7 @@ function DesktopHeader() {
           <MembersIcon size={22} />
         </button>
         <label className="chat-search">
-          <input placeholder={`Search GOD // THE LOUNGE`} aria-label="Search" />
+          <input placeholder={t.searchGuild("GOD // THE LOUNGE")} aria-label={t.search} />
           <SearchIcon size={16} />
         </label>
       </div>

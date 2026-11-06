@@ -130,9 +130,30 @@ export interface Message {
   reactions?: Reaction[];
   attachments?: Attachment[];
   isHuman?: boolean;
+  /** Seeded/simulated lines carry both languages; the UI language picks one. */
+  i18n?: { en: string; de: string };
+  /** Simulator bookkeeping (category of the generated line) */
+  simTag?: string;
 }
 
 export interface ChannelReadState {
   unread: boolean;
   mentions: number;
+}
+
+/** Backstage controls for the NPC simulator. */
+export interface SimSettings {
+  /** 0.25 (sleepy) … 3 (chaos) — multiplier on posting rate */
+  activity: number;
+  /** 0 (everyone hates you) … 100 (everyone worships you) */
+  glaze: number;
+  /** 0 (wholesome) … 100 (messy) */
+  drama: number;
+  /** What they talk about and how they act. */
+  prompt: string;
+  /** NPCs answer the owner with a language model (needs an AI key — Phase 4). */
+  liveReplies: boolean;
+  /** NPCs may joke about being simulated. */
+  breakCharacter: boolean;
+  paused: boolean;
 }

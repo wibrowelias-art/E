@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { GUILD_SLUG_BY_ID, GUILD_SLUGS, GUILDS } from "@/data/guilds";
+import { useSimulation } from "@/lib/sim/engine";
 import { useCurrentGuild, useLounge, type MobilePane } from "@/lib/store";
+import { Backstage } from "./Backstage";
+import { SettingsMenu } from "./SettingsMenu";
 import { GuildGlyph } from "./Brand";
 import { ChannelPanel, MobileUserCard } from "./ChannelPanel";
 import { Chat } from "./Chat";
-import { HelpIcon, InboxIcon } from "./icons";
+import { HelpIcon, InboxIcon, SlidersIcon } from "./icons";
 import { ProfilePopout } from "./ProfilePopout";
 import { ServerRail } from "./ServerRail";
 import { UserPanel } from "./UserPanel";
@@ -19,6 +22,7 @@ interface Props {
 
 function TitleBar() {
   const guild = useCurrentGuild();
+  const openBackstage = useLounge((s) => s.openBackstage);
   return (
     <div className="titlebar">
       <span className="titlebar__icon [&>svg]:h-full [&>svg]:w-full">
@@ -26,6 +30,9 @@ function TitleBar() {
       </span>
       <span>{guild.name}</span>
       <div className="titlebar__right">
+        <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Backstage" title="Backstage" onClick={() => openBackstage(true)}>
+          <SlidersIcon size={19} />
+        </button>
         <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Inbox">
           <InboxIcon size={20} />
         </button>
@@ -41,7 +48,11 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
   const hydrate = useLounge((s) => s.hydrate);
   const mobilePane = useLounge((s) => s.mobilePane);
   const membersOpen = useLounge((s) => s.membersOpen);
+  const ready = useLounge((s) => s.ready);
+  const fixture = useLounge((s) => s.fixture);
   const [frame, setFrame] = useState<string | undefined>();
+  const [simOn, setSimOn] = useState(false);
+  useSimulation(ready && simOn && !fixture);
 
   // Hydrate client-side only: timestamps are relative to the visitor's clock.
   useEffect(() => {
@@ -59,6 +70,13 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
     const params = new URLSearchParams(window.location.search);
     setFrame(params.get("frame") ?? undefined);
     if (params.get("fixture") === "ref") useLounge.setState({ fixture: true, typing: {} });
+    useLounge.getState().loadPrefs();
+    const lang = params.get("lang");
+    if (lang === "en" || lang === "de") useLounge.getState().setLang(lang);
+    document.documentElement.lang = useLounge.getState().lang;
+    if (params.get("backstage") === "1") useLounge.getState().openBackstage(true);
+    setSimOn(params.get("sim") !== "off");
+    if (params.has("debug")) (window as unknown as { __lounge: typeof useLounge }).__lounge = useLounge;
     const delay = Number(params.get("delay") ?? 0);
     const t = setTimeout(() => hydrate(Date.now()), delay);
     const tick = setInterval(() => useLounge.setState({ now: Date.now() }), 60_000);
@@ -103,6 +121,8 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
       </div>
       <UserPanel />
       <ProfilePopout />
+      <SettingsMenu />
+      <Backstage />
     </div>
   );
 }

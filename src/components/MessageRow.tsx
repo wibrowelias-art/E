@@ -5,6 +5,7 @@ import { ROLES } from "@/data/npcs";
 import { clock, fullTimestamp, headerTime, shortHeaderTime } from "@/lib/format";
 import { isJumboEmoji, plainPreview, renderMarkup, type MarkupContext } from "@/lib/markup";
 import type { Attachment, Message, User } from "@/lib/types";
+import type { Lang, Strings } from "@/lib/i18n";
 import { Avatar } from "./Avatar";
 import { CrownIcon, EditIcon, MoreIcon, ReactIcon, ReplyIcon } from "./icons";
 
@@ -14,6 +15,11 @@ export interface MessageRowProps {
   groupStart: boolean;
   replyTo?: { message: Message; author: User } | null;
   now: number;
+  lang: Lang;
+  t: Strings;
+  /** Text in the current language */
+  text: string;
+  replyText?: string;
   viewerId: string;
   mentioned: boolean;
   editing: boolean;
@@ -57,7 +63,7 @@ function AttachmentArt({ a }: { a: Attachment }) {
   );
 }
 
-function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {
+function EditBox({ initial, onSave, onCancel, t }: { initial: string; onSave: (v: string) => void; onCancel: () => void; t: Strings }) {
   const [value, setValue] = useState(initial);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -93,7 +99,10 @@ function EditBox({ initial, onSave, onCancel }: { initial: string; onSave: (v: s
         />
       </div>
       <div className="editbox__hint">
-        escape to <b onClick={onCancel}>cancel</b> • enter to <b onClick={() => onSave(value)}>save</b>
+        {t.editHint[0]}
+        <b onClick={onCancel}>{t.editHint[1]}</b>
+        {t.editHint[2]}
+        <b onClick={() => onSave(value)}>{t.editHint[3]}</b>
       </div>
     </div>
   );
@@ -103,7 +112,7 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
   const { message, author, groupStart, replyTo } = p;
   const isOwn = message.authorId === p.viewerId;
   const showHeader = groupStart || !!replyTo;
-  const jumbo = !message.attachments?.length && isJumboEmoji(message.content);
+  const jumbo = !message.attachments?.length && isJumboEmoji(p.text);
 
   const profile = (e: MouseEvent, userId: string) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -118,7 +127,7 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
       data-active={p.editing}
       id={`msg-${message.id}`}
       role="article"
-      aria-label={`${author.displayName}, ${clock(message.createdAt)}`}
+      aria-label={`${author.displayName}, ${clock(message.createdAt, p.lang)}`}
     >
       {replyTo && (
         <div className="msg__reply" onClick={() => p.onJumpTo(replyTo.message.id)}>
@@ -126,7 +135,7 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
           <span className="msg__reply-name" style={{ color: nameColor(replyTo.author) }}>
             @{replyTo.author.displayName}
           </span>
-          <span className="msg__reply-text">{plainPreview(replyTo.message.content)}</span>
+          <span className="msg__reply-text">{plainPreview(p.replyText ?? replyTo.message.content)}</span>
         </div>
       )}
 
@@ -145,29 +154,29 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
               {author.displayName}
             </span>
             {author.roleId === "owner" && (
-              <span style={{ color: "var(--mention)" }} title="Server owner" className="relative top-[2px]">
+              <span style={{ color: "var(--mention)" }} title={p.t.serverOwner} className="relative top-[2px]">
                 <CrownIcon size={14} />
               </span>
             )}
             {author.isBot && <span className="msg__tag">APP</span>}
-            <time className="msg__time" dateTime={new Date(message.createdAt).toISOString()} title={fullTimestamp(message.createdAt)}>
-              <span className="max-md:hidden">{headerTime(message.createdAt, p.now)}</span>
-              <span className="md:hidden">{shortHeaderTime(message.createdAt, p.now)}</span>
+            <time className="msg__time" dateTime={new Date(message.createdAt).toISOString()} title={fullTimestamp(message.createdAt, p.lang)}>
+              <span className="max-md:hidden">{headerTime(message.createdAt, p.now, p.lang)}</span>
+              <span className="md:hidden">{shortHeaderTime(message.createdAt, p.now, p.lang)}</span>
             </time>
           </div>
         </>
       ) : (
-        <time className="msg__gutter-time" title={fullTimestamp(message.createdAt)}>
-          {clock(message.createdAt)}
+        <time className="msg__gutter-time" title={fullTimestamp(message.createdAt, p.lang)}>
+          {clock(message.createdAt, p.lang)}
         </time>
       )}
 
       {p.editing ? (
-        <EditBox initial={message.content} onSave={(v) => p.onSaveEdit(message.id, v)} onCancel={() => p.onEdit(null)} />
+        <EditBox initial={message.content} onSave={(v) => p.onSaveEdit(message.id, v)} onCancel={() => p.onEdit(null)} t={p.t} />
       ) : (
         <div className={`msg__content ${jumbo ? "msg__content--jumbo" : ""}`}>
-          {renderMarkup(message.content, p.markup)}
-          {message.editedAt && <span className="msg__edited">(edited)</span>}
+          {renderMarkup(p.text, p.markup)}
+          {message.editedAt && <span className="msg__edited">{p.t.edited}</span>}
         </div>
       )}
 

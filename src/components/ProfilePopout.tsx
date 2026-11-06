@@ -1,16 +1,15 @@
 "use client";
 
 import { NPC_PROFILES, ROLES } from "@/data/npcs";
-import { useLounge } from "@/lib/store";
+import { useLounge, useT } from "@/lib/store";
 import { Avatar } from "./Avatar";
-
-const PRESENCE = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Offline" } as const;
 
 export function ProfilePopout() {
   const userId = useLounge((s) => s.profileUserId);
   const anchor = useLounge((s) => s.profileAnchor);
   const user = useLounge((s) => (s.profileUserId ? s.users[s.profileUserId] : undefined));
   const close = useLounge((s) => s.openProfile);
+  const t = useT();
   if (!userId || !user) return null;
   const role = ROLES[user.roleId];
   const profile = NPC_PROFILES.find((p) => p.userId === user.id);
@@ -31,14 +30,14 @@ export function ProfilePopout() {
           <div className="popout__name">{user.displayName}</div>
           <div className="popout__user">
             {user.username}
-            {user.statusText ? ` · ${user.statusEmoji ?? ""} ${user.statusText}` : ` · ${PRESENCE[user.presence]}`}
+            {user.statusText ? ` · ${user.statusEmoji ?? ""} ${user.statusText}` : ` · ${t.presenceOther[user.presence]}`}
           </div>
           <div className="popout__card">
             {profile && (
               <>
-                <div className="popout__label">About me</div>
+                <div className="popout__label">{t.aboutMe}</div>
                 <p className="m-0 mb-3">{profile.bio}</p>
-                <div className="popout__label">Based in</div>
+                <div className="popout__label">{t.basedIn}</div>
                 <p className="m-0 mb-3">
                   {profile.district ? `${profile.district}, ` : ""}
                   {profile.city === "online" ? "online" : profile.city}
@@ -47,11 +46,11 @@ export function ProfilePopout() {
             )}
             {user.id === "u_elias" && (
               <>
-                <div className="popout__label">About me</div>
-                <p className="m-0 mb-3">Hamburg. Photography, night culture, building apps. Owner of The Lounge.</p>
+                <div className="popout__label">{t.aboutMe}</div>
+                <p className="m-0 mb-3">{t.ownerAbout}</p>
               </>
             )}
-            <div className="popout__label">Roles</div>
+            <div className="popout__label">{t.roles}</div>
             <span className="role-chip">
               <i style={{ background: role.color ?? "var(--text-muted)" }} />
               {role.name}

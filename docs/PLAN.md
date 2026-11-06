@@ -61,6 +61,26 @@ Mix: 10 fans · 4 rival-friends · 11 chill · 7 skeptic-warm; 6 night owls,
 8 always-on, 14 evening, 4 morning lurkers. 21 of 32 live in Hamburg,
 23 write mostly German, 5 are English-only (online / abroad).
 
+## Backstage = the spec's `/ops` god mode
+
+| Spec item | Where |
+| --- | --- |
+| Pause / resume | Backstage › Conversations › "Floor is live" |
+| Density slider (chill → packed club) | Backstage › World activity (0.25× – 3×) |
+| Force topic | Backstage › Vibe prompt (topics + tone) |
+| Spawn burst in a channel | Backstage › "Start a burst in #channel" |
+| Glaze / drama dials (owner request) | Backstage › Glaze ratio, Drama level |
+| View last AI prompt/response | Backstage › Live feed shows the last lines + category (stub); prompts appear here once Phase 4 lands |
+| Mute one NPC | not yet (Phase 3, server tick) |
+
+Defaults ("Default vibe"): activity 1.0×, glaze 65 %, drama 20 %, prompt about
+tonight's plans, film photos, music, food and Elias' drops; friendly, a little teasing.
+
+## Language
+
+English default (UI + chat). Deutsch = German UI + the original Hamburg mix,
+per-NPC `germanRatio`. Every seeded and generated line is stored as `{ en, de }`.
+
 ## Simulation design (Phase 3/4, informs the data model now)
 
 - **Tick** picks a channel by weight × recent activity × time-of-day curve,

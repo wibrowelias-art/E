@@ -6,10 +6,11 @@ A dark, Discord-class community app for **GOD // THE LOUNGE** — a Hamburg serv
 that should feel packed and alive the moment you open it. Original name, logo,
 icons and content; no Discord assets, fonts or trademarks.
 
-> **Status: Phase 0 + Phase 1 (shell UI) done.** The chrome, channel list,
-> message stream, members, voice presence, composer and mobile screens run on a
-> hand-written static backlog. Persistence, the always-on NPC simulator and live AI
-> providers are Phases 2–4 (see [`docs/PLAN.md`](docs/PLAN.md)).
+> **Status: Phase 0 + Phase 1 done, plus an early slice of Phase 3.** The full UI,
+> an English/Deutsch language switch, **Backstage** (activity, glaze ratio, drama,
+> vibe prompt, presets) and a built-in-lines NPC simulator that runs in the
+> browser. Still to come: persistence + login (Phase 2), the server-side
+> always-on tick (Phase 3), live AI providers (Phase 4). See [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Run
 
@@ -25,11 +26,14 @@ pnpm dev                     # http://localhost:3000
 | `pnpm typecheck` | `tsc --noEmit` (strict) |
 | `pnpm seed` | Validates the 32-NPC cast, channel map and backlog (ages 20–34, no duplicate lines, nothing posted as Elias) and writes `data/seed.json` |
 | `pnpm shots` | Renders every screen and the CURRENT vs REFERENCE sheets into `docs/screenshots/` (needs a running server, `BASE_URL` to override) |
-| `pnpm smoke` | Interaction checks: Enter / Shift+Enter, ↑ edit, Esc, reactions, channel switch, mobile navigation |
+| `pnpm smoke` | Interaction checks: Enter / Shift+Enter, ↑ edit, Esc, reactions, channel switch, language switch, Backstage, mobile navigation |
+| `pnpm sim:check` | Simulator acceptance tests with a fake clock (cold open, 5-minute volume, duplicates, Elias share, every Backstage control) |
 
 URLs: `/` (mobile opens on the channel list), `/channels/lounge/<channel>`,
 `/channels/lab/roadmap`, `/channels/darkroom/darkroom`.
-Debug params: `?frame=ios` simulates the iPhone safe areas (status bar 51pt,
+Debug params: `?lang=en|de`, `?backstage=1` opens Backstage, `?sim=off` freezes
+the floor (static backlog only), `?debug` exposes `window.__lounge` (store) for tests,
+`?frame=ios` simulates the iPhone safe areas (status bar 51pt,
 home indicator 34pt) for screenshot comparison; `?fixture=ref` swaps in a channel
 list / chat with the same row structure as the reference screenshots.
 
@@ -51,6 +55,53 @@ list / chat with the same row structure as the reference screenshots.
   Offline, status dots, status text, crown, APP tag), profile popouts, skeletons on first paint.
 - Responsive: desktop ≥ 1200 (members column), tablet 768–1199 (members drawer),
   mobile < 768 (channel list ↔ chat slide, matched to the reference screenshots).
+
+## Language
+
+English is the default: interface **and** chat. Switch with the ⚙ gear in the
+bottom-left panel (desktop), by tapping your status on the mobile user card, or in
+Backstage. **Deutsch** turns the interface German and shows the chat as the
+original Hamburg German/English mix (each NPC writes German as often as their
+persona says). Every backlog line and every simulator line is stored in both
+versions, so switching re-renders the whole history instantly. Saved per device.
+`pnpm seed` fails if any English line still contains German.
+
+## Backstage
+
+Open it from the sliders icon in the title bar (desktop), the gear / user-card
+menu, or `?backstage=1`. Changes apply live and are saved on the device.
+
+| Control | Range | Default vibe | What it does |
+| --- | --- | --- | --- |
+| World activity | 0.25× sleepy … 3.00× chaos | 1.00× | Posting rate, burst size, typing speed; above 1.6× parallel conversations start |
+| Glaze ratio | 0 % everyone hates you … 100 % everyone worships you | 65 % | Mood of Elias-related lines: roast → critical → mild → praise → worship. 0 % and 100 % are absolute |
+| Drama level | 0 % wholesome … 100 % messy | 20 % | Share of gossip/beef lines and disagreeing replies vs. wholesome ones |
+| Vibe prompt | free text, 600 chars | plans for tonight, film photos, music, food, Elias' drops; friendly, a little teasing | Topics become conversation starters; tone words (hyped / chill / sarcastic / kind) shift style and sliders. Detected topics and tone are shown under the field |
+| Live replies | on/off | off (disabled) | Needs an AI provider — arrives in Phase 4 |
+| Let people break character | on/off | off | Occasional "wait are we NPCs" jokes |
+| Floor is live | on/off | on | Pause / resume the simulation |
+| Start a burst | button | — | 6 quick messages in the channel you're looking at |
+
+Presets: **Default vibe**, **Wholesome Sunday**, **Afterhours chaos**,
+**Roast night**; "Reset everything to the default vibe" restores all controls.
+Roasts stay playful — the phrase banks contain no slurs, threats, real addresses
+or anything involving minors.
+
+Simulator (Phase 3 preview, `src/lib/sim/`): quiet gaps then 3–6 message bursts,
+typing indicators (sometimes typing then giving up), ~45 % replies following the
+relationship graph, max 2 posts in a row per NPC, NPC reactions, voice
+join/leave/speaking, presence changes, replies when you post, and backfill when you
+return to the tab. Every line is checked against the last 300 messages and the last
+110 templates used. **Limits:** it runs in your browser tab, so each visitor sees their
+own floor and nothing is saved; the shared server-side tick comes in Phase 3, and there
+is no login yet, so anyone who can open the app can open Backstage (owner-only gating
+comes with auth in Phase 2).
+
+`pnpm sim:check` (default vibe, 5 simulated minutes): cold open 4 messages + a reply
+chain within 15 s · 49–60 messages · 0 near-duplicate pairs · 15–26 mention Elias /
+The Lounge / his apps · ~45 % replies · glaze 0 % → 0 % praise, 100 % → 0 % roasts ·
+drama 0 % → 100 % raises drama/disagree lines ~5–8× · sleepy vs chaos ≈ 8 vs 140
+messages in 3 minutes.
 
 ## AI providers (Phase 4 — not wired yet)
 
@@ -75,6 +126,8 @@ src/data/           npcs.ts (cast), guilds.ts (channel map), messages.ts (backlo
                     seed.ts (assembly + validation), fixture.ts (comparison fixtures)
 src/lib/            types, zustand store, markup renderer, time formatting
 scripts/            seed.ts, compare.mjs (screenshots), smoke.mjs (interaction checks)
+src/lib/sim/        settings + presets, phrase banks (EN + DE), brain (stub composer), engine (clock)
+src/lib/i18n.ts     UI strings (English / Deutsch)
 docs/               PLAN.md (Phase 0), reference/ (privacy-blurred references), screenshots/
 ```
 
@@ -114,3 +167,8 @@ Remaining differences (honest list):
   the sampled colour tokens, but they have not been checked side-by-side.
   Desktop message text uses a derived `#dbdbe0`; the mobile reference's body text
   is `#fcfcfe`.
+- **Backstage** (`docs/screenshots/backstage.compare.png`): World and Conversations
+  cards within ~2px of the reference. Differences by design: "Live replies" is
+  unchecked and disabled until an AI provider exists, "Let people break character"
+  is off in the default vibe, and Backstage adds Presets, Vibe prompt, Language,
+  Live feed and Reset cards that the reference doesn't show.

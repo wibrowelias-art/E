@@ -16,7 +16,7 @@ const ok = (cond, msg) => {
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(`${BASE}/channels/lounge/general`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE}/channels/lounge/general?sim=off&lang=en`, { waitUntil: "networkidle" });
   await page.waitForSelector(".msg");
   ok(await page.locator(".skel").count() === 0, "skeleton replaced by messages after hydration");
   const input = page.locator(".composer__input");
@@ -51,7 +51,7 @@ try {
 
   await page.locator(".chanrow", { hasText: "hamburg-night" }).first().click();
   await page.waitForTimeout(400);
-  ok(page.url().endsWith("/channels/lounge/hamburg-night"), "channel switch updates URL");
+  ok(new URL(page.url()).pathname === "/channels/lounge/hamburg-night", "channel switch updates URL");
   ok((await page.locator(".composer__input").getAttribute("placeholder")) === "Message #hamburg-night", "placeholder follows channel");
 
   await page.locator(".msg__name").first().click();
@@ -59,8 +59,32 @@ try {
   await page.keyboard.press("Escape");
   ok((await page.locator(".popout").count()) === 0, "Esc closes popout");
 
+  // Language switch: gear → Deutsch → UI + backlog switch, back to English.
+  await page.locator(".upanel .iconbtn").last().click();
+  await page.locator(".smenu__item", { hasText: "Deutsch" }).click();
+  await page.waitForTimeout(200);
+  ok((await page.locator(".composer__input").getAttribute("placeholder")) === "Nachricht an #hamburg-night", "Deutsch: UI strings switch");
+  ok((await page.locator(".msglist").innerText()).includes("komme grad aus der nachtschicht"), "Deutsch: backlog shows the Hamburg mix");
+  await page.locator(".smenu__item", { hasText: "English" }).click();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  const english = await page.locator(".msglist").innerText();
+  ok(english.includes("just got off night shift") && !english.includes("nachtschicht"), "English: backlog fully English");
+
+  // Backstage: opens from the title bar, sliders + preset + reset persist.
+  await page.locator('.titlebar [aria-label="Backstage"]').click();
+  ok(await page.locator(".bs").isVisible(), "Backstage opens");
+  await page.locator(".bs-preset", { hasText: "Roast night" }).click();
+  ok((await page.locator(".bs-slider__value").nth(1).innerText()) === "15%", "preset sets glaze ratio");
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("lounge.sim") ?? "{}"));
+  ok(stored.glaze === 15 && stored.activity === 1.6, "settings persist in localStorage");
+  await page.locator(".bs-reset").click();
+  ok((await page.locator(".bs-preset[data-active=true]").innerText()).includes("Default vibe"), "reset → Default vibe active");
+  await page.keyboard.press("Escape");
+  ok((await page.locator(".bs").count()) === 0, "Esc closes Backstage");
+
   const m = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
-  await m.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await m.goto(`${BASE}/?sim=off&lang=en`, { waitUntil: "networkidle" });
   await m.waitForSelector(".msg");
   ok((await m.locator(".app").getAttribute("data-pane")) === "channels", "mobile opens on channel list");
   await m.locator(".chanrow", { hasText: "glaze" }).first().tap();

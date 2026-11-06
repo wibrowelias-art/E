@@ -3,8 +3,8 @@
 import { Fragment } from "react";
 import { FIXTURE_CATEGORIES, FIXTURE_CHANNELS, FIXTURE_SELECTED, FIXTURE_UNREAD } from "@/data/fixture";
 import { ROLES } from "@/data/npcs";
-import { useCurrentChannel, useCurrentGuild, useLounge } from "@/lib/store";
-import type { Category, Channel } from "@/lib/types";
+import { useCurrentChannel, useCurrentGuild, useLounge, useT } from "@/lib/store";
+import type { Category, Channel, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
 import {
   BadgeFlower,
@@ -21,8 +21,6 @@ import {
   SpeakerIcon,
   StageWaveIcon,
 } from "./icons";
-
-const PRESENCE_LABEL = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Invisible" } as const;
 
 export function ChannelPanel({ onNavigate }: { onNavigate: (channelId: string) => void }) {
   const guild = useCurrentGuild();
@@ -45,6 +43,7 @@ export function ChannelPanel({ onNavigate }: { onNavigate: (channelId: string) =
 
 function MobileGuildHeader() {
   const guild = useCurrentGuild();
+  const t = useT();
   return (
     <header className="guildhead--mobile">
       <div className="mhead__title">
@@ -57,14 +56,14 @@ function MobileGuildHeader() {
         </span>
       </div>
       <div className="mhead__meta">
-        <span>{guild.memberIds.length.toLocaleString("en-US")} Members</span>
+        <span>{t.members(guild.memberIds.length.toLocaleString(t.locale))}</span>
         <span className="mhead__dot" />
-        <span>Community</span>
+        <span>{t.community}</span>
       </div>
       <div className="mhead__row">
-        <button className="mhead__search" aria-label="Search">
+        <button className="mhead__search" aria-label={t.search}>
           <SearchIcon size={21} />
-          <span>Search</span>
+          <span>{t.search}</span>
         </button>
         <button className="mhead__invite" aria-label="Invite people">
           <InviteIcon size={21} />
@@ -180,6 +179,7 @@ function ChannelRow({
   onClick: () => void;
 }) {
   const locked = channel.staffOnly || channel.locked;
+  const t = useT();
   const Icon = locked ? LockIcon : channel.kind === "voice" ? SpeakerIcon : HashIcon;
   const iconClass = locked ? "chanrow__icon chanrow__icon--lock" : channel.kind === "voice" ? "chanrow__icon chanrow__icon--voice" : "chanrow__icon";
   return (
@@ -200,7 +200,7 @@ function ChannelRow({
         {channel.emoji && <span className="chanrow__slashes">//</span>}
         {channel.name}
       </span>
-      {channel.isNew && !selected && <span className="chanrow__new">NEW</span>}
+      {channel.isNew && !selected && <span className="chanrow__new">{t.newPill}</span>}
       {mentions > 0 && <span className="chanrow__mentions">{mentions}</span>}
     </button>
   );
@@ -235,6 +235,8 @@ function VoiceUsers({ channelId }: { channelId: string }) {
 export function MobileUserCard() {
   const viewer = useLounge((s) => s.users[s.viewerId]);
   const readState = useLounge((s) => s.readState);
+  const openSettingsMenu = useLounge((s) => s.openSettingsMenu);
+  const t = useT();
   const total = Object.values(readState).reduce((n, r) => n + r.mentions, 0);
   if (!viewer) return <div className="mcard" />;
   return (
@@ -245,15 +247,22 @@ export function MobileUserCard() {
           <StatusDotOnly presence={viewer.presence} />
         </span>
       </div>
-      <div className="mcard__meta">
+      <button
+        className="mcard__meta"
+        aria-label={`${t.settings}: ${t.language}, ${t.backstage}`}
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          openSettingsMenu({ x: r.left, y: r.top, mobile: true });
+        }}
+      >
         <div className="mcard__icons">
           <DottedCircle size={14} />
           <span style={{ color: "var(--text-strong)" }}>
             <ChevronDown size={18} style={{ strokeWidth: 3 }} />
           </span>
         </div>
-        <div className="mcard__status-text">{PRESENCE_LABEL[viewer.presence]}</div>
-      </div>
+        <div className="mcard__status-text">{t.presence[viewer.presence]}</div>
+      </button>
       <button className="mcard__bell" aria-label={`Notifications${total ? `, ${total} unread` : ""}`}>
         <BellIcon size={19} />
         {total > 0 && <span className="mcard__badge">{total}</span>}
@@ -262,7 +271,7 @@ export function MobileUserCard() {
   );
 }
 
-function StatusDotOnly({ presence }: { presence: keyof typeof PRESENCE_LABEL }) {
+function StatusDotOnly({ presence }: { presence: User["presence"] }) {
   const color =
     presence === "online"
       ? "var(--status-online)"

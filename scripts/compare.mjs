@@ -32,7 +32,9 @@ const settle = async (page) => {
 async function shot(browser, name, url, viewport, dpr, prep) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: dpr, hasTouch: viewport.width < 768 });
   const page = await ctx.newPage();
-  await page.goto(BASE + url, { waitUntil: "networkidle" });
+  // Screens are captured on the static backlog (sim off, English) so they're reproducible.
+  const sep = url.includes("?") ? "&" : "?";
+  await page.goto(BASE + url + (url.includes("sim=") ? "" : `${sep}sim=off&lang=en`), { waitUntil: "networkidle" });
   await settle(page);
   if (prep) await prep(page);
   const file = path.join(OUT, `${name}.current.png`);
@@ -92,6 +94,18 @@ try {
     await page.waitForTimeout(150);
   });
   await shot(browser, "tablet-general", "/channels/lounge/general", { width: 1024, height: 768 }, 1);
+
+  // 5) Backstage — desktop + the reference's phone width, scrolled to the WORLD card like the reference.
+  await shot(browser, "backstage-desktop", "/channels/lounge/general?backstage=1", { width: 1440, height: 900 }, 1);
+  const bs = await shot(browser, "backstage-mobile-430", "/channels/lounge/general?backstage=1&frame=ios", { width: 430, height: 539 }, 1280 / 430, async (page) => {
+    await page.evaluate(() => {
+      const card = [...document.querySelectorAll(".bs-card")].find((c) => c.textContent?.startsWith("World"));
+      const scroller = document.querySelector(".bs__scroll");
+      if (card && scroller) scroller.scrollTop = card.offsetTop - scroller.getBoundingClientRect().top - 2;
+    });
+    await page.waitForTimeout(150);
+  });
+  await compareSheet(browser, "backstage", bs, path.resolve("docs/reference/backstage.jpg"), 1280, 1605);
   console.log("✓ screenshots written to docs/screenshots/");
 } finally {
   await browser.close();
