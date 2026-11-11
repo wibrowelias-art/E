@@ -93,6 +93,7 @@ const vb = await viewer("/api/bootstrap");
 let cur = { rev: vb.json.rev, after: vb.json.serverNow };
 const seen = new Map();
 let typingSeen = 0;
+const typingLog = [];
 async function pollFor(ms, c = viewer) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -101,6 +102,7 @@ async function pollFor(ms, c = viewer) {
       cur = { rev: r.json.rev, after: r.json.serverNow };
       for (const m of r.json.messages) seen.set(m.id, m);
       typingSeen += r.json.typing.length;
+      for (const t of r.json.typing) typingLog.push({ at: r.json.serverNow, ...t });
     }
     await sleep(1500);
   }
@@ -113,13 +115,19 @@ ok(floorMsgs.length >= 3, `floor runs on the server with no browser driving it: 
 ok(floorMsgs.every((m) => m.createdAt <= Date.now()), "scheduled messages only appear once their time has come");
 ok(typingSeen > 0, `shared typing indicators come from the server (${typingSeen} seen)`);
 
-const ask = await owner("/api/messages", { body: { channelId: "c_general", content: `who's out tonight? (${Date.now()})` } });
-await pollFor(12_000);
+// Phase 3 "NPCs that feel human": answers take 2–40 s with typing first, and sometimes nobody answers —
+// so this names someone who's always around (named NPCs almost always answer) and waits up to 42 s.
+const ask = await owner("/api/messages", { body: { channelId: "c_general", content: `@Kemal who's out tonight? (${Date.now()})` } });
+const askedAt = ask.json.message.createdAt;
+await pollFor(42_000);
 const answers = [...seen.values()].filter((m) => m.replyToId === ask.json.message.id);
-ok(answers.length >= 1, `owner posts → ${answers.length} NPC replies within 12s (scheduled server-side)`);
+const lag = answers.map((m) => m.createdAt - askedAt);
+ok(answers.length >= 1 && lag.every((d) => d >= 2000 && d <= 41_000), `owner posts → ${answers.length} NPC replies, ${lag.map((d) => (d / 1000).toFixed(1) + " s").join(", ")} later (2–40 s, scheduled server-side)`);
+const typedFirst = answers.filter((m) => typingLog.some((t) => t.userId === m.authorId && t.channelId === m.channelId && t.at < m.createdAt && t.at >= askedAt));
+ok(answers.length > 0 && typedFirst.length === answers.length, `typing indicator shown before ${typedFirst.length}/${answers.length} replies`);
 const hi = await viewer("/api/messages", { body: { channelId: "c_intros", content: `hello, just looking around (${Date.now()})` } });
-await pollFor(10_000);
-ok([...seen.values()].some((m) => m.replyToId === hi.json.message.id), "guest says hi in #introductions → an NPC welcomes them");
+await pollFor(42_000);
+ok([...seen.values()].some((m) => m.replyToId === hi.json.message.id), "guest says hi in #introductions → an NPC welcomes them (within 42 s)");
 
 const burst = await owner("/api/sim/burst", { body: { channelId: "c_memes" } });
 const tb = Date.now();

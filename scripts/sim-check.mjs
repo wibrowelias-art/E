@@ -89,7 +89,8 @@ try {
       maxRun = Math.max(maxRun, run);
     }
   }
-  ok(maxRun <= 2, `max posts in a row by one NPC: ${maxRun} (≤2)`);
+  // ≤3: NPCs send 2–3 short messages in a row instead of one long one (Phase 3 "feel human").
+  ok(maxRun <= 3, `max posts in a row by one NPC: ${maxRun} (≤3)`);
   const german = five.filter((m) => GERMAN.test(m.en.replace(/@\w+/g, "")));
   ok(german.length === 0, `English mode: ${german.length} generated lines with German words`);
   await s.ctx.close();
@@ -117,7 +118,7 @@ try {
 
   const calm = await run({ drama: 0 }, 300_000);
   const messy = await run({ drama: 100 }, 300_000);
-  ok(share(messy, ["drama", "disagree"]) > share(calm, ["drama", "disagree"]) * 3, `drama: ${Math.round(share(calm, ["drama", "disagree"]) * 100)}% at 0 → ${Math.round(share(messy, ["drama", "disagree"]) * 100)}% at 100`);
+  ok(share(messy, ["drama", "disagree", "bicker"]) > share(calm, ["drama", "disagree", "bicker"]) * 3, `drama: ${Math.round(share(calm, ["drama", "disagree", "bicker"]) * 100)}% at 0 → ${Math.round(share(messy, ["drama", "disagree", "bicker"]) * 100)}% at 100`);
 
   const prompted = await run({ prompt: "Talk about the rooftop party on Friday and vintage cameras. Be hyped." });
   const hits = prompted.filter((m) => /rooftop party on friday|vintage cameras/i.test(m.en)).length;

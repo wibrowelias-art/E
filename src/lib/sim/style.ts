@@ -63,16 +63,26 @@ function capitalise(t: string): string {
   return t.slice(0, i) + t.charAt(i).toUpperCase() + t.slice(i + 1);
 }
 
-/** Natural break points for a burst: after . ? ! … , — : (never inside quotes or multi-line memes). */
-function segments(t: string): string[] {
+/**
+ * Natural break points for a burst: after . ? ! … (and , — : unless `strong`).
+ * Never inside quotes or multi-line memes.
+ */
+function segments(t: string, strong = false): string[] {
   if (/["“„]/.test(t) || t.includes("\n")) return [t];
   const out: string[] = [];
-  for (const s of t.split(/(?<=[.?!…,—:])\s+/)) {
+  for (const s of t.split(strong ? /(?<=[.?!…])\s+/ : /(?<=[.?!…,—:])\s+/)) {
     const prev = out[out.length - 1];
     if (prev !== undefined && (s.length < 4 || prev.length < 4)) out[out.length - 1] = `${prev} ${s}`;
     else out.push(s);
   }
   return out;
+}
+
+const words = (t: string) => ` ${t.toLowerCase().replace(/[^\p{L}\p{N}\p{Extended_Pictographic}' ]+/gu, " ").replace(/\s+/g, " ").trim()} `;
+/** True if `text` already contains the slang's words ("… no notes" in "perfect, no notes"). */
+function hasWords(text: string, slang: string): boolean {
+  const core = words(slang.replace("…", "")).trim();
+  return !!core && words(text).includes(` ${core} `);
 }
 
 /** Fold a segment list down to `n` pieces (the tail stays together). */
@@ -144,7 +154,9 @@ export function humanize(input: StyleInput): Styled | null {
   const noEmoji = p.emojiRate === 0 || calm;
   const emoji = !noEmoji && p.emoji.length && rng() < Math.min(0.9, p.emojiRate + (tone.hype ? 0.1 : 0)) ? (rng() < 0.6 ? p.emoji[0]! : pick(p.emoji, rng)) : "";
   const emojiAlone = !!emoji && rng() < 0.15;
-  const slangIdx = !input.noSplit && p.slang.en.length && rng() < SLANG_RATE ? Math.floor(rng() * p.slang.en.length) : -1;
+  let slangIdx = !input.noSplit && p.slang.en.length && rng() < SLANG_RATE ? Math.floor(rng() * p.slang.en.length) : -1;
+  // Skip it (in both languages) when the line already says it ("no notes — no notes").
+  if (slangIdx >= 0 && (hasWords(input.en, p.slang.en[slangIdx]!) || hasWords(input.de, p.slang.de[slangIdx]!))) slangIdx = -1;
   const doTypo = !input.noSplit && rng() < p.typoRate + (tone.hype ? 0.03 : 0);
   const doFix = rng() < FIX_RATE;
   const fixStyle = Math.floor(rng() * 6);
@@ -152,20 +164,30 @@ export function humanize(input: StyleInput): Styled | null {
   const caps = input.en.length < 60 && rng() < (p.caps ?? 0) + (tone.hype && p.caps ? 0.05 : 0);
 
   // Split / trim: long lines go out as a burst; very short texters often just send the first bit.
-  const segEn = segments(input.en);
-  const segDe = segments(input.de);
-  const n = Math.min(segEn.length, segDe.length, 3);
+  // EN and DE must break at the same places: commas first, else sentence ends only, else not at all.
+  let segEn = segments(input.en);
+  let segDe = segments(input.de);
+  if (segEn.length !== segDe.length) {
+    segEn = segments(input.en, true);
+    segDe = segments(input.de, true);
+  }
+  if (segEn.length !== segDe.length) {
+    segEn = [input.en];
+    segDe = [input.de];
+  }
+  const n = Math.min(segEn.length, 3);
   let mode: "one" | "burst" | "trim" = "one";
   if (!input.noSplit && n >= 2) {
     const limit = Math.max(24, p.msgLength * 1.3);
     if (input.en.length > limit) mode = rng() < (p.msgLength < 22 ? 0.45 : 0.12) ? "trim" : rng() < 0.8 ? "burst" : "one";
     else if (input.en.length > 22 && rng() < 0.18) mode = "burst";
   }
-  if (mode === "trim" && (segEn[0]!.split(" ").length < 2 || segDe[0]!.split(" ").length < 2)) mode = "burst";
+  // Only drop the rest after a finished sentence ("rain again." ✓, "if elias says it," ✗).
+  if (mode === "trim" && (segEn[0]!.split(" ").length < 2 || segDe[0]!.split(" ").length < 2 || !/[.?!…]$/.test(segEn[0]!) || !/[.?!…]$/.test(segDe[0]!))) mode = "burst";
 
-  const build = (segs: string[], lang: "en" | "de"): string[] => {
-    let parts = mode === "burst" ? fold(segs, n) : mode === "trim" ? [segs[0]!] : [segs.join(" ")];
-    parts = parts.map((t) => tidy(lower ? lowerChat(t) : t, lower || mode !== "one"));
+  const build = (segs: string[], lang: "en" | "de", as: typeof mode): string[] => {
+    let parts = as === "burst" ? fold(segs, n) : as === "trim" ? [segs[0]!] : [segs.join(" ")];
+    parts = parts.map((t) => tidy(lower ? lowerChat(t) : t, lower || as !== "one"));
     if (noEmoji) parts = parts.map((t) => t.replace(EMOJI_RE, "").replace(/\s{2,}/g, " ").trim());
     if (calm) parts = parts.map((t) => t.replace(/!+/g, ""));
     parts = parts.filter(Boolean);
@@ -174,8 +196,7 @@ export function humanize(input: StyleInput): Styled | null {
       const i = parts.findIndex((t) => /\belias\b/i.test(t));
       if (i >= 0) parts[i] = parts[i]!.replace(/\belias\b/i, "@Elias");
     }
-    const core = slangIdx >= 0 ? p.slang[lang][slangIdx]!.replace(/[…—().,:!?]/g, "").trim().toLowerCase() : "";
-    if (slangIdx >= 0 && core && !parts.join(" ").toLowerCase().includes(core)) {
+    if (slangIdx >= 0) {
       const s = p.slang[lang][slangIdx]!;
       if (!s.includes("…")) {
         if (parts.length < 3) parts.push(s);
@@ -187,7 +208,9 @@ export function humanize(input: StyleInput): Styled | null {
       }
     }
     if (emoji) {
-      if (emojiAlone && parts.length < 3) parts.push(emoji);
+      if (emojiAlone && parts.length < 3) {
+        if (parts[parts.length - 1] !== emoji) parts.push(emoji);
+      }
       else {
         const last = parts.length - 1;
         if (!ENDS_WITH_EMOJI.test(parts[last]!)) parts[last] = `${parts[last]} ${emoji}`;
@@ -198,14 +221,17 @@ export function humanize(input: StyleInput): Styled | null {
     return parts;
   };
 
-  let en = build(segEn, "en");
-  let de = build(segDe, "de");
+  let en = build(segEn, "en", mode);
+  let de = build(segDe, "de", mode);
   if (!en.length || !de.length) return null;
   // Keep the two languages the same number of messages.
   const m = Math.min(en.length, de.length);
   en = fold(en, m);
   de = fold(de, m);
-  const whole: Part = { en: en.join(" "), de: de.join(" ") };
+  // The same line as one message (keeps its commas), for when a burst can't go out.
+  const one = mode === "trim" ? en : build(segEn, "en", "one");
+  const oneDe = mode === "trim" ? de : build(segDe, "de", "one");
+  const whole: Part = { en: one.join(" "), de: oneDe.join(" ") };
 
   let fix: Styled["fix"];
   if (doTypo) {

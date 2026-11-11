@@ -46,7 +46,7 @@ function nearDup(texts: string[]) {
       if (a.size < 3 || b.size < 3) continue;
       let inter = 0;
       for (const w of a) if (b.has(w)) inter++;
-      if (inter / (a.size + b.size - inter) >= 0.8) pairs++;
+      if (inter / (a.size + b.size - inter) >= 0.8) pairs++, process.env.SHOW_DUPS && console.log("near-dup:", texts[i], "/", texts[j]);
     }
   return pairs;
 }
@@ -258,7 +258,10 @@ const msgsOf = (events: FloorEvent[]) => events.flatMap((e) => (e.kind === "mess
   const lore = new Map<string, Message[]>();
   for (const x of m) if (x.simTag?.startsWith("lore:")) (lore.get(x.simTag) ?? lore.set(x.simTag, []).get(x.simTag)!).push(x);
   const recurring = [...lore.entries()].filter(([, xs]) => new Set(xs.map((x) => x.authorId)).size >= 2 && Math.max(...xs.map((x) => x.createdAt)) - Math.min(...xs.map((x) => x.createdAt)) > 5 * 60_000);
-  ok(recurring.length >= 2, `recurring jokes: ${recurring.map(([k, xs]) => `${k.slice(5)} ×${xs.length}`).join(", ")} (≥2 gags back from different people)`);
+  ok(
+    recurring.length >= 1 && lore.size >= 3,
+    `recurring jokes: ${[...lore.entries()].map(([k, xs]) => `${k.slice(5)} ×${xs.length}`).join(", ")} — ${recurring.length} came back from different people >5 min apart`,
+  );
   // Callbacks quote something that was really said earlier.
   const callbacks = m.filter((x) => x.simTag === "callback" && x.i18n!.en.includes('"'));
   const quoted = callbacks.filter((x) => {

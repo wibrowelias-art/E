@@ -83,7 +83,7 @@ export interface PlannerState {
 }
 
 export function initialPlannerState(now: number): PlannerState {
-  return { nextStepAt: now + 800, flurryLeft: 5, flurryChannel: "c_general", threadId: null, templates: [], warm: 1, fast: 3 };
+  return { nextStepAt: now + 800, flurryLeft: 5, flurryChannel: "c_general", threadId: null, templates: [], warm: 1, fast: 5 };
 }
 
 export interface World {
@@ -246,17 +246,22 @@ export class Planner {
   /** Whoever just posted twice in a row in this channel (they sit the next one out). */
   private twoInRow(channelId: string, at: number): string | null {
     const recent = this.channel(channelId)
-      .filter((m) => m.createdAt <= at + 30_000)
+      .filter((m) => m.createdAt <= at)
       .sort((a, b) => a.createdAt - b.createdAt)
       .slice(-2);
     return recent.length === 2 && recent[0]!.authorId === recent[1]!.authorId ? recent[0]!.authorId : null;
   }
 
-  private lastAuthor(channelId: string, at: number): string | null {
-    const list = this.channel(channelId).filter((m) => m.createdAt <= at + 30_000);
-    let last: Message | null = null;
-    for (const m of list) if (!last || m.createdAt >= last.createdAt) last = m;
-    return last?.authorId ?? null;
+  /** People still typing / with a message queued at `at` — nobody types two messages at once. */
+  private busy(at: number): Set<string> {
+    const out = new Set<string>();
+    for (const list of this.world.recent.values()) {
+      for (let i = list.length - 1; i >= Math.max(0, list.length - 40); i--) {
+        const m = list[i]!;
+        if (m.createdAt > at && m.createdAt - 20_000 <= at) out.add(m.authorId);
+      }
+    }
+    return out;
   }
 
   /** How likely someone writes at `at`: their active hours, presence and how chatty they are. */
@@ -269,14 +274,15 @@ export class Planner {
 
   pickAuthor(channelId: string, at: number, exclude: string[] = []): User | undefined {
     const twoInRow = this.twoInRow(channelId, at);
-    const pool = this.npcs().filter((u) => u.id !== twoInRow && !exclude.includes(u.id) && u.presence !== "offline");
+    const busy = this.busy(at);
+    const pool = this.npcs().filter((u) => u.id !== twoInRow && !busy.has(u.id) && !exclude.includes(u.id) && u.presence !== "offline");
     let author = weightedPick(
       pool.map((u) => [u, this.authorWeight(u, at)] as [User, number]),
       this.rng,
     );
     if (!author || this.rng() < 0.03) {
       // Someone offline picks up their phone — usually someone who's awake.
-      const offline = this.npcs().filter((u) => u.presence === "offline" && !exclude.includes(u.id) && u.id !== twoInRow);
+      const offline = this.npcs().filter((u) => u.presence === "offline" && !exclude.includes(u.id) && u.id !== twoInRow && !busy.has(u.id));
       const awake = offline.filter((u) => presenceTarget(u.id, at) !== "offline");
       const from = awake.length ? awake : this.rng() < 0.15 ? offline : [];
       if (from.length) {
@@ -354,7 +360,7 @@ export class Planner {
       const g = GAGS[id];
       const last = this.state.gags?.[id];
       const recent = last !== undefined && at - last < 8 * 60_000;
-      return [id, g.weight * (g.owners.includes(authorId) ? 2.5 : 1) * (recent ? 0.2 : 1) * (g.roasty ? 1 - 0.75 * this.eff.glaze : 1)] as [GagId, number];
+      return [id, g.weight * (g.owners.includes(authorId) ? 2.5 : 1) * (recent ? 0.35 : 1) * (g.roasty ? 1 - 0.75 * this.eff.glaze : 1)] as [GagId, number];
     });
     return weightedPick(items, this.rng) ?? "jacket";
   }
@@ -382,9 +388,9 @@ export class Planner {
     return null;
   }
 
-  private available(id: string, at: number, notIds: Array<string | null>): boolean {
+  private available(id: string, at: number, notIds: Array<string | null>, busy: Set<string>): boolean {
     const u = this.world.users.get(id);
-    return !!u && u.isNpc && !this.muted(id) && u.presence !== "offline" && !notIds.includes(id) && presenceTarget(id, at) !== "offline";
+    return !!u && u.isNpc && !this.muted(id) && u.presence !== "offline" && !notIds.includes(id) && !busy.has(id) && presenceTarget(id, at) !== "offline";
   }
 
   /** Decide + compose one post at time `at` (typing starts at `at`) — or a reaction instead of a reply. */
@@ -405,6 +411,7 @@ export class Planner {
       const target = replyTo.authorId;
       const tp = PROFILE.get(target)?.personality;
       const notIds = [target, twoInRow];
+      const busy = this.busy(at);
       const relOf = (id: string): typeof relation => {
         const p = personaOf(id);
         if (p.rivals.includes(target) || tp?.rivals.includes(id)) return "rival";
@@ -413,10 +420,10 @@ export class Planner {
       };
       // Conversations go back and forth: whoever was answered often answers back.
       const parent = replyTo.replyToId ? this.findMessage(replyTo.replyToId) : null;
-      if (parent && parent.authorId !== target && this.available(parent.authorId, at, notIds) && this.rng() < 0.3) {
+      if (parent && parent.authorId !== target && this.available(parent.authorId, at, notIds, busy) && this.rng() < 0.3) {
         author = this.world.users.get(parent.authorId);
       } else {
-        const ids = NPC_PROFILES.map((p) => p.userId).filter((id) => this.available(id, at, notIds));
+        const ids = NPC_PROFILES.map((p) => p.userId).filter((id) => this.available(id, at, notIds, busy));
         const rivals = ids.filter((id) => relOf(id) === "rival");
         const friends = ids.filter((id) => relOf(id) === "friend");
         // Rivals bicker (more with drama); friends back each other up.
@@ -442,7 +449,7 @@ export class Planner {
     else if (replyAuthor?.roleId === "owner") category = ownerReplyCategory(this.eff, this.rng);
     else if (relation === "rival" && this.eff.drama > 0.02 && this.rng() < 0.25 + 0.6 * this.eff.drama) category = "bicker";
     else if (relation === "friend" && this.rng() < 0.3) category = "friend";
-    else if (parentGag && this.rng() < 0.55) category = "lore";
+    else if (parentGag && this.rng() < 0.4) category = "lore";
     else if (this.rng() < 0.45) category = replyCategory(this.eff, replyTo.simTag, this.rng);
     else if (ELIAS_TAGS.has(replyTo.simTag ?? "") && this.rng() < 0.7) category = eliasCategory(this.eff.glaze, this.rng);
     else if (replyTo.simTag === "prompt" && hasTopics && this.rng() < 0.6) category = "prompt";
@@ -474,8 +481,10 @@ export class Planner {
    */
   post(channelId: string, d: Draft, at: number, opts: { past?: boolean; quick?: boolean; human?: boolean; firstTyping?: number } = {}): Message {
     const persona = personaOf(d.author.id);
-    // Right after their own message, people don't fire off another 2–3 in a row.
-    const solo = !opts.human && (d.c.parts.length > 1 || !!d.c.fix) && this.lastAuthor(channelId, at) === d.author.id;
+    // Right after their own message, people don't fire off another 2–3 in a row (and a Backstage burst is one line each).
+    const solo =
+      d.c.parts.length > 1 &&
+      (!!opts.quick || (!opts.human && this.channel(channelId).some((m) => m.authorId === d.author.id && m.createdAt >= at - 60_000)));
     const seqParts: Array<{ p: ComposedPart; fix: boolean }> = solo ? [{ p: d.c, fix: false }] : d.c.parts.map((p) => ({ p, fix: false }));
     if (d.c.fix && !solo) seqParts.splice(d.c.fix.after + 1, 0, { p: d.c.fix, fix: true });
     const tag = d.c.gag ? `lore:${d.c.gag}` : d.c.category;

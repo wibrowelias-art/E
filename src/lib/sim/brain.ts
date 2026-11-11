@@ -96,7 +96,7 @@ export function eliasCategory(glaze: number, rng: Rng): Category {
 /** A prompt the owner wrote themselves steers harder than the default vibe. */
 export function promptWeight(s: SimSettings, hasTopics: boolean): number {
   if (!hasTopics) return 0;
-  return s.prompt.trim() === DEFAULT_PROMPT.trim() ? 0.3 : 0.65;
+  return s.prompt.trim() === DEFAULT_PROMPT.trim() ? 0.3 : 0.75;
 }
 
 
@@ -109,14 +109,14 @@ export function freshCategory(
 ): Category {
   const bucket = weighted(
     {
-      elias: 0.46,
+      elias: 0.56,
       drama: 0.03 + e.drama * 0.37,
       wholesome: (1 - e.drama) * 0.1,
       prompt: promptWeight(s, hasTopics),
       meta: s.breakCharacter ? 0.08 : 0,
       topic: 0.36,
       // Server lore (running gags) and callbacks to earlier lines.
-      lore: extra.lore ? 0.1 : 0,
+      lore: extra.lore ? 0.11 : 0,
       callback: extra.callback ? 0.07 : 0,
     },
     rng,
