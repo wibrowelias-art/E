@@ -58,6 +58,43 @@ export interface NpcProfile {
   germanRatio: number;
   /** User ids this NPC tends to reply to. */
   relationships: string[];
+  /** How this person texts and when they are around (Phase 3: NPCs that feel human). */
+  personality: NpcPersonality;
+}
+
+/** Texting habits + daily rhythm of one NPC. Hours are Hamburg time (Europe/Berlin). */
+export interface NpcPersonality {
+  /** Phone typing speed, characters per minute. */
+  typingCpm: number;
+  /** Usually around and chatty between these hours [from, to) — may wrap midnight. */
+  activeHours: [number, number];
+  /** Asleep (offline) between these hours [from, to) — may wrap midnight. */
+  sleepHours: [number, number];
+  /** Phone never leaves their hand: idle at worst, never offline. */
+  alwaysOn?: boolean;
+  /** Slang, "…" marks where the message goes ("ngl …", "… fr"); no "…" = a standalone line. */
+  slang: { en: string[]; de: string[] };
+  /** Share of messages that get an emoji (0–1). */
+  emojiRate: number;
+  /** Favourite emoji, most used first. */
+  emoji: string[];
+  /** Chance a message has a typo (0–1). */
+  typoRate: number;
+  /** Typical message length in characters. */
+  msgLength: number;
+  /** Share of messages typed all lowercase (0–1). */
+  lowercase: number;
+  /** Share of SHOUTED messages when excited (0–1). */
+  caps?: number;
+  /** How likely they answer when someone posts (0–1). */
+  chattiness: number;
+  /** How often they react with an emoji instead of writing (0–1). */
+  reactRate: number;
+  interests: string[];
+  /** NPC user ids they hype up and reply to. */
+  friends: string[];
+  /** NPC user ids they bicker with (lightly, scaled by the drama slider). */
+  rivals: string[];
 }
 
 export type ChannelKind = "text" | "voice";

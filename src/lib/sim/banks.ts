@@ -2,6 +2,7 @@
  * Stub-brain phrase banks. Every line exists in English and German (the German
  * side is used for the "Deutsch" Hamburg mix). Slots are filled at runtime:
  *   {shot} {project} {place} {food} {music} {time} {npc} {npc2} {game} {name} {topic}
+ *   {quote} (a fragment of an earlier line, callbacks only) {vlogday} (days since the vlog was promised)
  * German lines only use {shot} as an accusative object so articles stay correct.
  * Roasts stay playful: no slurs, threats, real addresses or anything about minors.
  */
@@ -11,9 +12,33 @@ export interface Line {
   de: string;
   /** Preferred channels (ids). */
   ch?: string[];
+  /** Running gag this line belongs to (category "lore"). */
+  gag?: GagId;
+  /** Only these NPCs say it (e.g. Mara about her own jacket). */
+  only?: string[];
+  /** These NPCs never say it (nobody talks about themselves in the third person). */
+  skip?: string[];
 }
 
 const L = (en: string, de: string, ch?: string[]): Line => ({ en, de, ch });
+const G = (gag: GagId, en: string, de: string, who: { only?: string[]; skip?: string[] } = {}): Line => ({ en, de, gag, ...who });
+
+/**
+ * Server lore: running gags that come back over time and get picked up by
+ * different people. `owners` bring them up more often; `roasty` gags fade out
+ * when the room adores Elias (high glaze).
+ */
+export type GagId = "jacket" | "bahn" | "afterparty" | "vlog" | "seagull" | "hallway";
+export const GAGS: Record<GagId, { weight: number; owners: string[]; roasty?: boolean }> = {
+  jacket: { weight: 1.2, owners: ["u_mara", "u_leni", "u_ida", "u_niko"] },
+  bahn: { weight: 1, owners: ["u_finn", "u_jule", "u_lukas", "u_amira"] },
+  afterparty: { weight: 0.9, owners: ["u_tarek", "u_niko", "u_oskar", "u_mara"] },
+  vlog: { weight: 1, owners: ["u_pia", "u_jonas", "u_daniel", "u_merve"], roasty: true },
+  seagull: { weight: 0.8, owners: ["u_yuki", "u_paul", "u_kemal", "u_can"] },
+  hallway: { weight: 0.7, owners: ["u_daniel", "u_malik", "u_vincent", "u_kemal"], roasty: true },
+};
+/** The vlog was promised on this day; the counter in the running gag keeps growing. */
+export const VLOG_PROMISED_AT = Date.UTC(2026, 8, 26);
 const GENERAL = "c_general";
 const NIGHT = "c_hhnight";
 const GLAZE = "c_glaze";
@@ -65,7 +90,13 @@ export type Category =
   | "ownerNeutral"
   | "prompt"
   | "meta"
-  | "greet";
+  | "greet"
+  | "lore"
+  | "callback"
+  | "bicker"
+  | "friend"
+  | "short"
+  | "answer";
 
 export const BANKS: Record<Category, Line[]> = {
   worship: [
@@ -117,7 +148,7 @@ export const BANKS: Record<Category, Line[]> = {
     L("not to be that person but {project} still crashes when i upload more than 20 photos", "nicht böse gemeint aber {project} stürzt immer noch ab wenn ich über 20 fotos hochlade", [BUILD]),
     L("{shot} was good but elias, we've seen neon in puddles a lot lately", "ich mag {shot}, aber elias, neon in pfützen hatten wir jetzt echt oft", [GLAZE, PHOTO]),
     L("the guest list last week was a bit messy ngl", "die gästeliste letzte woche war schon etwas chaotisch ngl", [GENERAL, NIGHT]),
-    L("elias promised the vlog six days ago. six.", "elias hat den vlog vor sechs tagen versprochen. sechs.", [GENERAL, GLAZE]),
+    L("elias promised the vlog weeks ago. weeks.", "elias hat den vlog vor wochen versprochen. wochen.", [GENERAL, GLAZE]),
     L("hot take: the old invite cards were better", "hot take: die alten invite cards waren besser", [GLAZE]),
     L("{project} onboarding is still too long, i gave up at screen 4", "bei {project} hab ich beim onboarding auf screen 4 aufgegeben, zu lang", [BUILD]),
     L("elias, a little less 'coming soon' and a little more 'out now' please", "elias, bitte weniger 'coming soon' und mehr 'jetzt verfügbar'", [BUILD, GENERAL]),
@@ -307,6 +338,135 @@ export const BANKS: Record<Category, Line[]> = {
     L("welcome in! #hamburg-night has the plans for tonight", "willkommen! in #hamburg-night stehen die pläne für heute"),
     L("{name} make yourself at home, the drinks are imaginary but the vibes are real", "{name} fühl dich wie zuhause, die drinks sind ausgedacht aber der vibe ist echt"),
     L("ooh new face. hi {name}", "oh, neues gesicht. hi {name}"),
+  ],
+  lore: [
+    G("jacket", "has anyone seen mara's jacket. asking for mara", "hat jemand maras jacke gesehen. frage für mara", { skip: ["u_mara"] }),
+    G("jacket", "mara's jacket has been to more parties than me", "maras jacke war auf mehr partys als ich", { skip: ["u_mara"] }),
+    G("jacket", "update: the jacket is still in altona", "update: die jacke ist immer noch in altona"),
+    G("jacket", "the jacket deserves its own channel at this point", "die jacke verdient langsam einen eigenen channel"),
+    G("jacket", "someone check the coat check for the jacket", "kann mal jemand an der garderobe nach der jacke fragen"),
+    G("jacket", "not the jacket again 😭", "nicht schon wieder die jacke 😭"),
+    G("jacket", "rip to the jacket, gone but not forgotten", "rip jacke, gegangen aber nie vergessen"),
+    G("jacket", "if mara wears a jacket tonight i'm putting a tracker on it", "wenn mara heute ne jacke anhat kleb ich nen tracker dran", { skip: ["u_mara"] }),
+    G("jacket", "the jacket lore keeps growing", "die jacken-lore wird immer länger"),
+    G("jacket", "guys i found the jacket. it's a different jacket", "leute ich hab die jacke gefunden. ist ne andere jacke", { only: ["u_mara"] }),
+    G("jacket", "leave my jacket out of this", "lasst meine jacke da raus", { only: ["u_mara"] }),
+    G("bahn", "the 0:48 bahn strikes again", "die bahn um 0:48 hat wieder zugeschlagen"),
+    G("bahn", "never trust the 0:48. never", "trau niemals der 0:48. niemals"),
+    G("bahn", "who's walking home from the last bahn this time", "wer läuft diesmal von der letzten bahn nach hause"),
+    G("bahn", "the bahn said 2 minutes. it's been 20", "die bahn sagt 2 minuten. sind jetzt 20"),
+    G("bahn", "the s1 and i are not on speaking terms", "die s1 und ich reden nicht mehr miteinander"),
+    G("bahn", "bahn update: signal failure, as foretold", "bahn update: signalstörung, wie prophezeit"),
+    G("bahn", "the bahn owes me like 40 hours of my life", "die bahn schuldet mir so 40 stunden lebenszeit"),
+    G("bahn", "0:48 gang where you at", "0:48 gang, wo seid ihr"),
+    G("bahn", "missed the 0:48 by one stair. one", "die 0:48 um eine treppenstufe verpasst. eine"),
+    G("afterparty", "we don't talk about the fischmarkt afterparty", "über die fischmarkt-afterparty reden wir nicht"),
+    G("afterparty", "the fischmarkt afterparty was 8 months ago and i'm still recovering", "die fischmarkt-afterparty ist 8 monate her und ich erhol mich immer noch"),
+    G("afterparty", "nothing will ever top the fischmarkt afterparty", "nichts wird je die fischmarkt-afterparty toppen"),
+    G("afterparty", "this has fischmarkt afterparty energy and i'm scared", "das hat fischmarkt-afterparty energie und ich hab angst"),
+    G("afterparty", "someone still has the photos from the fischmarkt afterparty. delete them", "irgendwer hat noch die fotos von der fischmarkt-afterparty. löscht sie"),
+    G("afterparty", "6am, fischbrötchen, tarek playing off a speaker in a backpack. legendary", "6 uhr, fischbrötchen, tarek legt aus einer box im rucksack auf. legendär", { skip: ["u_tarek"] }),
+    G("afterparty", "fischmarkt afterparty reunion when", "wann ist das fischmarkt-afterparty reunion"),
+    G("afterparty", "i still don't know how we got home from the fischmarkt", "ich weiß bis heute nicht wie wir vom fischmarkt heimgekommen sind"),
+    G("vlog", "vlog watch, day {vlogday}", "vlog watch, tag {vlogday}"),
+    G("vlog", "day {vlogday} of waiting for the vlog", "tag {vlogday} des wartens auf den vlog"),
+    G("vlog", "the vlog is coming. sometime this decade", "der vlog kommt. irgendwann dieses jahrzehnt"),
+    G("vlog", "my grandkids will watch the vlog", "meine enkel werden den vlog sehen"),
+    G("vlog", "elias said vlog 'next week' {vlogday} days ago", "elias hat vor {vlogday} tagen 'nächste woche' zum vlog gesagt"),
+    G("vlog", "the vlog is a state of mind", "der vlog ist ein gefühl"),
+    G("vlog", "pia's vlog countdown is at {vlogday} now", "pias vlog countdown steht jetzt bei {vlogday}", { skip: ["u_pia"] }),
+    G("vlog", "is the vlog in the room with us right now", "ist der vlog gerade mit uns im raum"),
+    G("vlog", "updated the vlog countdown. {vlogday}. i'm not okay", "vlog countdown aktualisiert. {vlogday}. mir geht's nicht gut", { only: ["u_pia"] }),
+    G("seagull", "justice for the seagull", "gerechtigkeit für die möwe"),
+    G("seagull", "the fischbrötchen seagull is the real main character of this server", "die fischbrötchen-möwe ist die eigentliche hauptfigur dieses servers"),
+    G("seagull", "saw the seagull again. it remembers me", "hab die möwe wieder gesehen. sie erinnert sich an mich"),
+    G("seagull", "eat your fischbrötchen inside. learn from history", "esst eure fischbrötchen drinnen. lernt aus der geschichte"),
+    G("seagull", "yuki's seagull drawing is my wallpaper now", "yukis möwen-zeichnung ist jetzt mein hintergrund", { skip: ["u_yuki"] }),
+    G("seagull", "the seagull is on the guest list, elias confirmed", "die möwe steht auf der gästeliste, elias hat's bestätigt"),
+    G("seagull", "a seagull looked at my franzbrötchen today. we know how this ends", "eine möwe hat heute mein franzbrötchen angeschaut. wir wissen wie das endet"),
+    G("seagull", "seagull 1, us 0", "möwe 1, wir 0"),
+    G("hallway", "the hallway would never", "the hallway könnte das nie"),
+    G("hallway", "heard the hallway has 3 members now", "hab gehört the hallway hat jetzt 3 mitglieder"),
+    G("hallway", "careful or i'm moving to the hallway", "vorsicht, sonst zieh ich in the hallway"),
+    G("hallway", "the hallway is just this server with worse lighting", "the hallway ist dieser server mit schlechterem licht"),
+    G("hallway", "who's the admin of the hallway, asking for nobody", "wer ist admin von the hallway, frage für niemanden"),
+    G("hallway", "the hallway announced a vlog. they'll beat us to it", "the hallway hat einen vlog angekündigt. die sind schneller als wir"),
+    G("hallway", "the hallway merch dropped and it's just a doormat", "the hallway merch ist da und es ist nur eine fußmatte"),
+    G("hallway", "defecting to the hallway. jk. unless", "ich lauf über zu the hallway. spaß. außer…"),
+  ],
+  callback: [
+    L('{name} earlier: "{quote}" … and honestly yeah', '{name} vorhin: "{quote}" … und ehrlich, ja'),
+    L('still not over {name} saying "{quote}"', 'komm immer noch nicht drauf klar, dass {name} "{quote}" gesagt hat'),
+    L('going back to what {name} said earlier, "{quote}" — real', 'nochmal zu dem was {name} vorhin meinte, "{quote}" — stimmt'),
+    L('"{quote}" — {name}, earlier. nobody answered and i think about it a lot', '"{quote}" — {name}, vorhin. keiner hat geantwortet und ich denk oft dran'),
+    L('wait {name} what did you mean earlier with "{quote}"', 'warte {name}, was meintest du vorhin mit "{quote}"'),
+    L('{name} said "{quote}" and then just left 💀', '{name} schreibt "{quote}" und ist dann einfach weg 💀'),
+    L('can we go back to "{quote}" for a sec. {name} explain', 'können wir kurz zurück zu "{quote}". {name} erklär mal'),
+    L('{name} i keep thinking about "{quote}"', '{name} ich denk die ganze zeit an "{quote}"'),
+  ],
+  bicker: [
+    L("{name} nobody asked 🙄", "{name} hat keiner gefragt 🙄"),
+    L("says {name}, famous for being wrong", "sagt {name}, bekannt dafür falsch zu liegen"),
+    L("{name} sit down", "{name} setz dich"),
+    L("here we go again with {name}", "und wieder {name}, los geht's"),
+    L("{name} i will not be taking notes from you", "{name} von dir nehm ich keine tipps"),
+    L("the confidence {name}… respect, but no", "das selbstbewusstsein {name}… respekt, aber nein"),
+    L("{name} you said that last week too and you were wrong then too", "{name} das hast du letzte woche auch gesagt und lagst da auch falsch"),
+    L("not {name} acting like an expert again", "{name} spielt wieder experte"),
+    L("{name} name one time you were right", "{name} nenn ein einziges mal wo du recht hattest"),
+    L("lol ok {name}", "lol ok {name}"),
+    L("{name} this is why nobody lets you pick the music", "{name} deswegen darfst du nie die musik aussuchen"),
+    L("agree to disagree {name}. mostly disagree", "{name} wir sind uns uneinig. vor allem ich"),
+  ],
+  friend: [
+    L("{name} my favourite person in this chat", "{name} mein lieblingsmensch in diesem chat"),
+    L("{name} gets it", "{name} versteht's"),
+    L("listen to {name}", "hört auf {name}"),
+    L("{name} 🫶", "{name} 🫶"),
+    L("{name} you're so right it hurts", "{name} du hast so recht, tut weh"),
+    L("this is why we're friends {name}", "deswegen sind wir befreundet {name}"),
+    L("{name} i'm coming with you", "{name} ich komm mit"),
+    L("{name} say it again for the people in the back", "{name} sag's nochmal für die hinten"),
+    L("omg {name} same", "omg {name} same"),
+    L("{name} we need to hang out again soon", "{name} wir müssen uns bald mal wieder sehen"),
+  ],
+  short: [
+    L("wait what", "warte was"),
+    L("omg yes", "omg ja"),
+    L("elias 😭", "elias 😭"),
+    L("real", "real"),
+    L("no way", "niemals"),
+    L("say less", "sag nichts mehr"),
+    L("i'm in", "bin dabei"),
+    L("hmm debatable", "hmm fraglich"),
+    L("ok and?", "ok und?"),
+    L("you're not wrong", "unrecht hast du nicht"),
+    L("bro what", "digga was"),
+    L("so true", "so wahr"),
+    L("the audacity", "die audacity"),
+    L("elias pls", "elias bitte"),
+    L("say it louder", "sag's lauter"),
+    L("nah", "nee"),
+    L("valid", "valide"),
+    L("huh", "hä"),
+    L("wait fr?", "warte echt?"),
+    L("need details", "brauch details"),
+    L("love that for us", "love that für uns"),
+    L("big if true", "krass wenn's stimmt"),
+  ],
+  answer: [
+    L("depends who's asking", "kommt drauf an wer fragt"),
+    L("me. obviously", "ich. natürlich"),
+    L("if {npc} comes i'm in", "wenn {npc} kommt bin ich dabei"),
+    L("not me, i have work tomorrow", "ich nicht, muss morgen arbeiten"),
+    L("ask {npc}, they know everything", "frag {npc}, kennt sich mit allem aus"),
+    L("honestly yes", "ehrlich gesagt ja"),
+    L("maybe? depends on the weather", "vielleicht? kommt aufs wetter an"),
+    L("no idea but i support it", "keine ahnung aber ich bin dafür"),
+    L("yes. next question", "ja. nächste frage"),
+    L("ask me again after coffee", "frag mich nach dem kaffee nochmal"),
+    L("hard yes", "safe ja"),
+    L("ask me again {time}", "frag mich {time} nochmal"),
   ],
   meta: [
     L("sometimes it feels like we're all running on the same server lol", "manchmal fühlt es sich an als würden wir alle auf demselben server laufen lol"),

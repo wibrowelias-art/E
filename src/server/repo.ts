@@ -7,7 +7,7 @@ import type { Attachment, Message, Reaction, SimSettings } from "@/lib/types";
 import type { Session } from "./auth";
 import { BUMP_REV, CURRENT_REV } from "./db";
 import { defer } from "./defer";
-import { backstageLog, LOOKAHEAD_MS, scheduleReplies } from "./floor";
+import { backstageLog, scheduleReplies } from "./floor";
 import { rowToUser } from "./rows";
 import { resolveAttachments } from "./uploads";
 
@@ -66,7 +66,8 @@ function rowToMessage(r: Row, reactions: Map<string, Reaction[]>): Message {
   };
 }
 
-async function reactionsFor(c: Db, ids: string[], viewerId: string): Promise<Map<string, Reaction[]>> {
+/** Reactions on these messages that have happened by now (NPC reactions can be scheduled a few seconds ahead). */
+async function reactionsFor(c: Db, ids: string[], viewerId: string, now = Date.now()): Promise<Map<string, Reaction[]>> {
   const out = new Map<string, Reaction[]>();
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
@@ -76,8 +77,8 @@ async function reactionsFor(c: Db, ids: string[], viewerId: string): Promise<Map
       sql: `SELECT r.message_id, r.emoji, r.npc_count,
               (SELECT COUNT(*) FROM reaction_users u WHERE u.message_id = r.message_id AND u.emoji = r.emoji) AS humans,
               (SELECT COUNT(*) FROM reaction_users u WHERE u.message_id = r.message_id AND u.emoji = r.emoji AND u.user_id = ?) AS mine
-            FROM reactions r WHERE r.message_id IN (${q}) ORDER BY r.created_at, r.emoji`,
-      args: [viewerId, ...chunk],
+            FROM reactions r WHERE r.message_id IN (${q}) AND r.created_at <= ? ORDER BY r.created_at, r.emoji`,
+      args: [viewerId, ...chunk, now],
     });
     for (const row of res.rows) {
       const count = Number(row.npc_count) + Number(row.humans);
@@ -119,7 +120,8 @@ async function typingNow(c: Db, visible: string[], now: number) {
   const r = await c.execute({
     sql: `SELECT DISTINCT channel_id, author_id FROM messages
           WHERE created_at > ? AND created_at <= ? AND typing_ms > 0 AND created_at - typing_ms <= ? AND channel_id IN (${q})`,
-    args: [now, now + LOOKAHEAD_MS + 3000, now, ...visible],
+    // Answers to a human are scheduled up to ~40 s out and slow typists type for a while: look far enough ahead.
+    args: [now, now + 90_000, now, ...visible],
   });
   return r.rows.map((row) => ({ channelId: String(row.channel_id), userId: String(row.author_id) }));
 }
@@ -174,7 +176,7 @@ export async function poll(c: Db, s: Session, since: number, after: number) {
   const q = visible.map(() => "?").join(",");
   const now = Date.now();
   const LIMIT = 400;
-  const [byRev, byTime, users, rev, typing] = await Promise.all([
+  const [byRev, byTime, byReaction, users, rev, typing] = await Promise.all([
     // 1) everything written since the revision cursor (new, edited, reacted) that's visible
     c.execute({
       sql: `SELECT * FROM messages WHERE channel_id IN (${q}) AND rev > ? AND created_at <= ? ORDER BY rev ASC LIMIT ${LIMIT}`,
@@ -185,12 +187,19 @@ export async function poll(c: Db, s: Session, since: number, after: number) {
       sql: `SELECT * FROM messages WHERE channel_id IN (${q}) AND rev <= ? AND created_at > ? AND created_at <= ? ORDER BY created_at ASC LIMIT ${LIMIT}`,
       args: [...visible, since, after || now, now],
     }),
+    // 3) messages whose scheduled NPC reaction became visible since the last poll
+    c.execute({
+      sql: `SELECT * FROM messages WHERE channel_id IN (${q}) AND created_at <= ? AND id IN (
+              SELECT message_id FROM reactions WHERE created_at > ? AND created_at <= ?) LIMIT ${LIMIT}`,
+      args: [...visible, now, after || now, now],
+    }),
     c.execute({ sql: "SELECT * FROM users WHERE rev > ? ORDER BY rev ASC LIMIT 400", args: [since] }),
     currentRev(c),
     typingNow(c, visible, now),
   ]);
-  const rows = [...byRev.rows, ...byTime.rows];
-  const reactions = await reactionsFor(c, rows.map((r) => String(r.id)), s.uid);
+  const seen = new Set<string>();
+  const rows = [...byRev.rows, ...byTime.rows, ...byReaction.rows].filter((r) => !seen.has(String(r.id)) && !!seen.add(String(r.id)));
+  const reactions = await reactionsFor(c, rows.map((r) => String(r.id)), s.uid, now);
   // A full page means more is waiting: advance only as far as we read. One write batch shares a
   // revision, so step back one to re-read a partially read batch (duplicates merge by id).
   let nextRev = rev;
@@ -305,6 +314,8 @@ export async function toggleHumanReaction(c: Db, s: Session, id: string, emoji: 
     stmts.push({ sql: "DELETE FROM reaction_users WHERE message_id = ? AND emoji = ? AND user_id = ?", args: [id, emoji, s.uid] });
   } else {
     stmts.push({ sql: "INSERT INTO reactions (message_id, emoji, npc_count, created_at) VALUES (?,?,0,?) ON CONFLICT DO NOTHING", args: [id, emoji, Date.now()] });
+    // An NPC may have the same emoji scheduled for later: the human's reaction shows now.
+    stmts.push({ sql: "UPDATE reactions SET created_at = ? WHERE message_id = ? AND emoji = ? AND created_at > ?", args: [Date.now(), id, emoji, Date.now()] });
     stmts.push({ sql: "INSERT INTO reaction_users (message_id, emoji, user_id) VALUES (?,?,?)", args: [id, emoji, s.uid] });
   }
   stmts.push({ sql: `UPDATE messages SET rev = ${CURRENT_REV} WHERE id = ?`, args: [id] });
@@ -335,6 +346,11 @@ export async function putSim(c: Db, s: Session, body: unknown): Promise<SimSetti
   // Pause / mute take effect immediately: drop lines that are scheduled but not visible yet.
   if (!before.paused && settings.paused) {
     stmts.push({ sql: "DELETE FROM messages WHERE id LIKE 'm_sim_%' AND created_at > ?", args: [now] });
+    // …and NPC reactions that are scheduled but haven't happened yet.
+    stmts.push({
+      sql: "DELETE FROM reactions WHERE created_at > ? AND NOT EXISTS (SELECT 1 FROM reaction_users u WHERE u.message_id = reactions.message_id AND u.emoji = reactions.emoji)",
+      args: [now],
+    });
   }
   for (const id of (settings.muted ?? []).filter((m) => !(before.muted ?? []).includes(m))) {
     stmts.push({ sql: "DELETE FROM messages WHERE id LIKE 'm_sim_%' AND author_id = ? AND created_at > ?", args: [id, now] });

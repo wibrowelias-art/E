@@ -16,6 +16,7 @@
     "db:status": "tsx --env-file-if-exists=.env.local scripts/db.ts status",
     "api:check": "node scripts/api-check.mjs",
     "floor:check": "tsx scripts/floor-check.ts",
+    "floor:sample": "tsx scripts/floor-sample.ts",
     "ai:check": "node scripts/ai-check.mjs"
   },
   "dependencies": {

@@ -153,6 +153,7 @@ async function migrate(c: Db) {
     }
   }
   await c.execute("CREATE INDEX IF NOT EXISTS messages_created ON messages (created_at)");
+  await c.execute("CREATE INDEX IF NOT EXISTS reactions_created ON reactions (created_at)");
 }
 
 async function seedIfEmpty(c: Db) {

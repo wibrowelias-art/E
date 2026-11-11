@@ -1,4 +1,4 @@
-import type { NpcProfile, Presence, Role, RoleId, User } from "@/lib/types";
+import type { NpcPersonality, NpcProfile, Presence, Role, RoleId, User } from "@/lib/types";
 
 /**
  * The Lounge cast. 32 NPCs (ages 20–34, all adults), the owner (Elias, human)
@@ -26,8 +26,218 @@ interface NpcSeed {
   statusText?: string;
   statusEmoji?: string;
   voice?: { channelId: string; speaking?: boolean; selfMute?: boolean; selfDeaf?: boolean };
-  profile: Omit<NpcProfile, "userId">;
+  profile: Omit<NpcProfile, "userId" | "personality">;
 }
+
+/* ───────────── personality files ─────────────
+ * How each NPC texts and when they're around (Hamburg time). Slang: "…" marks
+ * where the message goes ("ngl …" = prefix, "… fr" = suffix); entries without
+ * "…" are standalone follow-ups. EN and DE lists pair up by index, so both
+ * language versions of a line get the same habit.
+ */
+const NIGHT_OWL = { activeHours: [20, 4], sleepHours: [6, 13] } as const;
+const EVENING = { activeHours: [17, 24], sleepHours: [1, 9] } as const;
+const MORNING = { activeHours: [6, 12], sleepHours: [22, 6] } as const;
+const ALWAYS = { activeHours: [10, 24], sleepHours: [2, 8] } as const;
+const hours = (h: { activeHours: readonly [number, number]; sleepHours: readonly [number, number] }) => ({
+  activeHours: [...h.activeHours] as [number, number],
+  sleepHours: [...h.sleepHours] as [number, number],
+});
+
+export const PERSONALITIES: Record<string, NpcPersonality> = {
+  u_mara: {
+    typingCpm: 290, ...hours(NIGHT_OWL), activeHours: [19, 3],
+    slang: { en: ["ok but …", "… pls", "literally …", "… i'm screaming", "pls."], de: ["ok aber …", "… bitte", "digga …", "… ich schrei", "bitte."] },
+    emojiRate: 0.45, emoji: ["😭😭", "🔥🔥", "🌅", "✨✨"], typoRate: 0.1, msgLength: 32, lowercase: 0.97, chattiness: 0.85, reactRate: 0.2,
+    interests: ["techno", "elbstrand", "film photos", "guest lists", "tonight"], friends: ["u_tarek", "u_ida", "u_leni", "u_niko", "u_jonas"], rivals: ["u_lukas", "u_clara"],
+  },
+  u_jonas: {
+    typingCpm: 380, ...hours(ALWAYS), alwaysOn: true,
+    slang: { en: ["not to be that guy but …", "… tbh", "ngl …", "… just saying"], de: ["not to be that guy aber …", "… ehrlich", "ngl …", "… nur so"] },
+    emojiRate: 0.08, emoji: ["🙃", "🐛"], typoRate: 0.03, msgLength: 45, lowercase: 0.8, chattiness: 0.7, reactRate: 0.15,
+    interests: ["spotly", "next.js", "espresso", "bug", "dark mode", "build"], friends: ["u_noor", "u_emil", "u_mara", "u_jasper"], rivals: ["u_daniel", "u_theo"],
+  },
+  u_leni: {
+    typingCpm: 330, ...hours(EVENING), caps: 0.15,
+    slang: { en: ["… iconic", "wait …", "… i'm obsessed", "omg …", "ICONIC."], de: ["… iconic", "warte …", "… bin besessen", "omg …", "ICONIC."] },
+    emojiRate: 0.35, emoji: ["💅", "👀", "✨"], typoRate: 0.07, msgLength: 35, lowercase: 0.85, chattiness: 0.8, reactRate: 0.15,
+    interests: ["fashion", "invite cards", "gossip", "berlin"], friends: ["u_pia", "u_mara", "u_jule", "u_yuki"], rivals: ["u_merve", "u_zara"],
+  },
+  u_tarek: {
+    typingCpm: 210, ...hours(NIGHT_OWL),
+    slang: { en: ["… tho", "ab 1.", "… no requests", "yo …"], de: ["… halt", "ab 1.", "… keine wünsche", "yo …"] },
+    emojiRate: 0.1, emoji: ["🎧", "🖤"], typoRate: 0.05, msgLength: 18, lowercase: 1, chattiness: 0.45, reactRate: 0.35,
+    interests: ["set", "vinyl", "club", "sound", "techno", "music"], friends: ["u_niko", "u_mara", "u_oskar"], rivals: ["u_malik", "u_pia"],
+  },
+  u_sofia: {
+    typingCpm: 300, ...hours(EVENING),
+    slang: { en: ["honestly — …", "… — no notes", "hm. …", "… (respectfully)"], de: ["honestly — …", "… — no notes", "hm. …", "… (respectfully)"] },
+    emojiRate: 0.12, emoji: ["🤍", "✏️"], typoRate: 0.02, msgLength: 50, lowercase: 0.45, chattiness: 0.5, reactRate: 0.25,
+    interests: ["type", "font", "branding", "design", "lisbon", "empty states"], friends: ["u_jonas", "u_hanna", "u_yuki"], rivals: ["u_vincent"],
+  },
+  u_kemal: {
+    typingCpm: 360, ...hours(ALWAYS), alwaysOn: true,
+    slang: { en: ["… 💀", "bro …", "… no cap", "nah …", "💀"], de: ["… 💀", "bruder …", "… ohne witz", "nee …", "💀"] },
+    emojiRate: 0.4, emoji: ["💀", "🎮"], typoRate: 0.06, msgLength: 14, lowercase: 1, chattiness: 0.6, reactRate: 0.3,
+    interests: ["game", "memes", "prices", "franzbrötchen", "food"], friends: ["u_finn", "u_paul", "u_can"], rivals: ["u_vincent", "u_yuki", "u_jasper"],
+  },
+  u_ida: {
+    typingCpm: 250, ...hours(EVENING), activeHours: [16, 24],
+    slang: { en: ["notes: …", "… one stop under", "ok but …", "… honestly"], de: ["notes: …", "… eine blende drunter", "ok aber …", "… ehrlich"] },
+    emojiRate: 0.12, emoji: ["📸", "🎞️"], typoRate: 0.04, msgLength: 40, lowercase: 0.9, chattiness: 0.6, reactRate: 0.2,
+    interests: ["film", "photo", "darkroom", "lab", "portra", "shot"], friends: ["u_hanna", "u_mara", "u_oskar", "u_rosa"], rivals: ["u_pia"],
+  },
+  u_finn: {
+    typingCpm: 340, ...hours(EVENING), activeHours: [15, 24],
+    slang: { en: ["… lol", "bro …", "… !!", "wait …", "LMAO"], de: ["… lol", "digga …", "… !!", "warte …", "HAHAHA"] },
+    emojiRate: 0.35, emoji: ["😂", "🚆", "🤡"], typoRate: 0.22, msgLength: 28, lowercase: 0.95, chattiness: 0.85, reactRate: 0.15,
+    interests: ["memes", "uni", "bahn", "train", "new in town"], friends: ["u_kemal", "u_lukas", "u_leni"], rivals: ["u_jule"],
+  },
+  u_noor: {
+    typingCpm: 400, ...hours(ALWAYS), alwaysOn: true,
+    slang: { en: ["… fwiw", "no. …", "… ship it", "works on my machine."], de: ["… fwiw", "nein. …", "… ship it", "works on my machine."] },
+    emojiRate: 0, emoji: [], typoRate: 0.01, msgLength: 30, lowercase: 0.85, chattiness: 0.35, reactRate: 0.25,
+    interests: ["database", "postgres", "sqlite", "infra", "imageforge", "backend"], friends: ["u_emil", "u_jonas", "u_jasper"], rivals: ["u_daniel"],
+  },
+  u_paul: {
+    typingCpm: 190, ...hours(MORNING), activeHours: [6, 13], sleepHours: [22, 5],
+    slang: { en: ["moin, …", "… honestly", "listen …", "… end of discussion"], de: ["moin, …", "… ehrlich", "pass auf …", "… ende der diskussion"] },
+    emojiRate: 0.12, emoji: ["🍳", "🐟"], typoRate: 0.08, msgLength: 38, lowercase: 0.85, chattiness: 0.5, reactRate: 0.2,
+    interests: ["food", "market", "fischbrötchen", "kitchen", "breakfast", "cook"], friends: ["u_kemal", "u_lea"], rivals: ["u_nele", "u_can"],
+  },
+  u_yuki: {
+    typingCpm: 260, ...hours(EVENING), activeHours: [14, 24],
+    slang: { en: ["… (affectionate)", "… (drawing this)", "oh …", "… hehe"], de: ["… (affectionate)", "… (zeichne ich)", "oh …", "… hehe"] },
+    emojiRate: 0.3, emoji: ["🐦", "✏️", "🥹"], typoRate: 0.03, msgLength: 34, lowercase: 0.95, chattiness: 0.55, reactRate: 0.3,
+    interests: ["drawing", "illustration", "anime", "lore", "seagull", "pigeon"], friends: ["u_leni", "u_rosa", "u_sofia"], rivals: ["u_kemal"],
+  },
+  u_ben: {
+    typingCpm: 280, ...hours(EVENING),
+    slang: { en: ["let's goo …", "… 💪", "bro …", "LETS GO"], de: ["los geht's …", "… 💪", "bruder …", "LETS GO"] },
+    emojiRate: 0.55, emoji: ["💪", "🔥", "💪🔥"], typoRate: 0.08, msgLength: 22, lowercase: 0.9, chattiness: 0.75, reactRate: 0.35, caps: 0.06,
+    interests: ["gym", "football", "nights out", "shot"], friends: ["u_mara", "u_finn"], rivals: ["u_lukas"],
+  },
+  u_clara: {
+    typingCpm: 350, ...hours(ALWAYS),
+    slang: { en: ["reminder: …", "… noted", "ok so …", "adding it to the list."], de: ["reminder: …", "… notiert", "ok also …", "kommt auf die liste."] },
+    emojiRate: 0.1, emoji: ["📝", "✅"], typoRate: 0.02, msgLength: 45, lowercase: 0.7, chattiness: 0.6, reactRate: 0.2,
+    interests: ["photo walk", "plan", "learning app", "stadtpark", "list"], friends: ["u_emil", "u_ben", "u_theo"], rivals: ["u_mara", "u_oskar", "u_daniel"],
+  },
+  u_malik: {
+    typingCpm: 300, ...hours(NIGHT_OWL),
+    slang: { en: ["… respekt", "yo …", "… on god", "respekt."], de: ["… respekt", "yo …", "… ehrenwort", "respekt."] },
+    emojiRate: 0.15, emoji: ["🎤", "👑"], typoRate: 0.06, msgLength: 30, lowercase: 0.95, chattiness: 0.55, reactRate: 0.2,
+    interests: ["rap", "berlin", "launch", "competition", "music"], friends: ["u_daniel", "u_vincent"], rivals: ["u_tarek", "u_zara"],
+  },
+  u_jule: {
+    typingCpm: 320, ...hours(EVENING), activeHours: [15, 24],
+    slang: { en: ["… typical leo", "omg …", "… 😩", "mercury is in retrograde."], de: ["… typisch löwe", "omg …", "… 😩", "merkur ist rückläufig."] },
+    emojiRate: 0.45, emoji: ["😩", "✨", "🔮"], typoRate: 0.1, msgLength: 30, lowercase: 0.95, chattiness: 0.8, reactRate: 0.15,
+    interests: ["astrology", "train", "bahn", "memes", "weekend"], friends: ["u_leni", "u_pia"], rivals: ["u_finn", "u_merve"],
+  },
+  u_niko: {
+    typingCpm: 230, ...hours(NIGHT_OWL), activeHours: [21, 5], sleepHours: [7, 14],
+    slang: { en: ["tip: …", "… trust me", "digga …", "… iykyk"], de: ["tipp: …", "… vertrau mir", "digga …", "… wer weiß, weiß"] },
+    emojiRate: 0.15, emoji: ["🍸", "🌙"], typoRate: 0.05, msgLength: 32, lowercase: 1, chattiness: 0.55, reactRate: 0.25,
+    interests: ["bar", "späti", "reeperbahn", "night", "drinks"], friends: ["u_tarek", "u_amira", "u_mara", "u_can"], rivals: ["u_theo"],
+  },
+  u_hanna: {
+    typingCpm: 300, ...hours(EVENING),
+    slang: { en: ["… what settings??", "wait …", "… obsessed", "omg …"], de: ["… what settings??", "warte …", "… obsessed", "omg …"] },
+    emojiRate: 0.3, emoji: ["✨", "😍"], typoRate: 0.06, msgLength: 32, lowercase: 0.9, chattiness: 0.75, reactRate: 0.25,
+    interests: ["preset", "fuji", "grain", "photo", "recipe", "shot"], friends: ["u_ida", "u_sofia", "u_oskar"], rivals: ["u_zara"],
+  },
+  u_emil: {
+    typingCpm: 330, ...hours(ALWAYS),
+    slang: { en: ["quick question …", "… right?", "wait …", "… i think"], de: ["kurze frage …", "… oder?", "warte …", "… glaub ich"] },
+    emojiRate: 0.15, emoji: ["🤓", "🦀"], typoRate: 0.07, msgLength: 36, lowercase: 0.95, chattiness: 0.7, reactRate: 0.15,
+    interests: ["imageforge", "sqlite", "rust", "side project", "build", "code"], friends: ["u_noor", "u_jonas", "u_clara"], rivals: ["u_daniel"],
+  },
+  u_zara: {
+    typingCpm: 360, ...hours(EVENING), activeHours: [18, 24],
+    slang: { en: ["… iconic, apparently", "respectfully …", "… (for research)", "hm."], de: ["… iconic, apparently", "respectfully …", "… (for research)", "hm."] },
+    emojiRate: 0.08, emoji: ["🙃", "📝"], typoRate: 0.02, msgLength: 55, lowercase: 0.5, chattiness: 0.45, reactRate: 0.25,
+    interests: ["music", "nightlife", "london", "scene", "journalism"], friends: ["u_tarek", "u_mara"], rivals: ["u_malik", "u_leni", "u_hanna"],
+  },
+  u_lukas: {
+    typingCpm: 270, ...hours(EVENING),
+    slang: { en: ["… ✋", "honestly …", "… like the volkspark", "next topic ✋"], de: ["… ✋", "ehrlich …", "… wie im volkspark", "nächstes thema ✋"] },
+    emojiRate: 0.25, emoji: ["⚽", "✋", "💙"], typoRate: 0.07, msgLength: 30, lowercase: 0.95, chattiness: 0.6, reactRate: 0.2,
+    interests: ["hsv", "football", "bike", "elbtunnel", "st. pauli"], friends: ["u_finn", "u_kemal"], rivals: ["u_mara", "u_ben"],
+  },
+  u_amira: {
+    typingCpm: 240, ...hours(NIGHT_OWL), activeHours: [22, 6], sleepHours: [9, 16],
+    slang: { en: ["just got off shift, …", "… i'm so tired", "ok wait …", "need sleep."], de: ["komme grad aus der schicht, …", "… bin so müde", "ok warte …", "brauch schlaf."] },
+    emojiRate: 0.2, emoji: ["😴", "🫠", "☕"], typoRate: 0.12, msgLength: 40, lowercase: 0.95, chattiness: 0.55, reactRate: 0.2,
+    interests: ["shift", "sleep", "brunch", "night"], friends: ["u_niko", "u_mara"], rivals: ["u_nele"],
+  },
+  u_theo: {
+    typingCpm: 170, ...hours(MORNING), activeHours: [7, 14], sleepHours: [23, 6],
+    slang: { en: ["well, actually …", "… historically speaking", "fun fact: …", "… if i may"], de: ["na ja, eigentlich …", "… historisch gesehen", "fun fact: …", "… wenn ich darf"] },
+    emojiRate: 0, emoji: [], typoRate: 0.02, msgLength: 70, lowercase: 0.3, chattiness: 0.4, reactRate: 0.1,
+    interests: ["architecture", "camera", "watch", "speicherstadt", "history"], friends: ["u_ida", "u_clara"], rivals: ["u_jonas", "u_niko"],
+  },
+  u_pia: {
+    typingCpm: 380, ...hours(EVENING), activeHours: [14, 24], caps: 0.12,
+    slang: { en: ["… 😭", "OMG …", "… for the vlog", "wait …", "content."], de: ["… 😭", "OMG …", "… für den vlog", "warte …", "content."] },
+    emojiRate: 0.5, emoji: ["😭", "😩", "🎬"], typoRate: 0.1, msgLength: 28, lowercase: 0.85, chattiness: 0.85, reactRate: 0.15,
+    interests: ["reel", "vlog", "trend", "content", "video"], friends: ["u_leni", "u_jule"], rivals: ["u_ida", "u_tarek", "u_rosa"],
+  },
+  u_daniel: {
+    typingCpm: 330, ...hours(ALWAYS), alwaysOn: true,
+    slang: { en: ["… (was a joke. half)", "hear me out …", "… wagmi", "put it on the blockchain."], de: ["… (war ein witz. halb)", "hört mir zu …", "… wagmi", "packt's auf die blockchain."] },
+    emojiRate: 0.15, emoji: ["🚀", "📈"], typoRate: 0.04, msgLength: 38, lowercase: 0.9, chattiness: 0.6, reactRate: 0.15,
+    interests: ["crypto", "startup", "rent", "hot take", "berlin"], friends: ["u_malik", "u_vincent"], rivals: ["u_jonas", "u_noor", "u_emil", "u_clara", "u_merve"],
+  },
+  u_lea: {
+    typingCpm: 200, ...hours(MORNING), activeHours: [6, 11], sleepHours: [23, 6],
+    slang: { en: ["morning", "… ok", "mhm …", "same."], de: ["morgen", "… ok", "mhm …", "same."] },
+    emojiRate: 0.25, emoji: ["☕", "🌧️", "🐈"], typoRate: 0.03, msgLength: 10, lowercase: 1, chattiness: 0.2, reactRate: 0.7,
+    interests: ["morning", "book", "rain", "cat", "tea"], friends: ["u_paul", "u_nele"], rivals: ["u_can"],
+  },
+  u_oskar: {
+    typingCpm: 240, ...hours(NIGHT_OWL),
+    slang: { en: ["… looked like blade runner", "yo …", "… no context", "fog tonight."], de: ["… sah aus wie blade runner", "yo …", "… ohne kontext", "nebel heute."] },
+    emojiRate: 0.2, emoji: ["🎥", "🌫️", "🛹"], typoRate: 0.07, msgLength: 26, lowercase: 1, chattiness: 0.5, reactRate: 0.3,
+    interests: ["video", "skate", "fog", "harbour", "night shoot", "clip"], friends: ["u_ida", "u_hanna", "u_niko", "u_tarek"], rivals: ["u_clara"],
+  },
+  u_merve: {
+    typingCpm: 310, ...hours(EVENING),
+    slang: { en: ["can we note for the record …", "… objection.", "to be precise, …", "objection."], de: ["können wir kurz festhalten …", "… einspruch.", "präzise gesagt, …", "einspruch."] },
+    emojiRate: 0.1, emoji: ["⚖️", "🫖"], typoRate: 0.02, msgLength: 36, lowercase: 0.8, chattiness: 0.5, reactRate: 0.2,
+    interests: ["law", "weather", "guest list", "ethics", "tea"], friends: ["u_clara", "u_amira"], rivals: ["u_leni", "u_daniel", "u_jule"],
+  },
+  u_jasper: {
+    typingCpm: 350, ...hours(ALWAYS),
+    slang: { en: ["lol", "… lol", "ok …", "… (shader voice)"], de: ["lol", "… lol", "ok …", "… (shader voice)"] },
+    emojiRate: 0.1, emoji: ["🎮", "🚲"], typoRate: 0.05, msgLength: 16, lowercase: 1, chattiness: 0.4, reactRate: 0.3,
+    interests: ["game dev", "map", "shader", "amsterdam", "bike", "bug"], friends: ["u_jonas", "u_noor"], rivals: ["u_kemal"],
+  },
+  u_nele: {
+    typingCpm: 260, ...hours(MORNING), activeHours: [6, 12], sleepHours: [22, 6],
+    slang: { en: ["you night creatures …", "… go to bed", "morning! …", "… run club sunday"], de: ["ihr nachtgestalten …", "… geht schlafen", "morgen! …", "… run club sonntag"] },
+    emojiRate: 0.3, emoji: ["☀️", "🏃‍♀️"], typoRate: 0.03, msgLength: 32, lowercase: 0.85, chattiness: 0.55, reactRate: 0.2,
+    interests: ["running", "alster", "breakfast", "sleep", "cooking"], friends: ["u_lea", "u_amira"], rivals: ["u_paul"],
+  },
+  u_vincent: {
+    typingCpm: 320, ...hours(EVENING),
+    slang: { en: ["that's the POINT …", "… resale value tho", "listen …", "limited run."], de: ["das ist der PUNKT …", "… resale value aber", "pass auf …", "limited run."] },
+    emojiRate: 0.2, emoji: ["💸", "👟"], typoRate: 0.05, msgLength: 32, lowercase: 0.85, chattiness: 0.6, reactRate: 0.2,
+    interests: ["sneaker", "drop", "merch", "resale", "price"], friends: ["u_daniel", "u_malik"], rivals: ["u_kemal", "u_sofia"],
+  },
+  u_rosa: {
+    typingCpm: 220, ...hours(EVENING), activeHours: [16, 24],
+    slang: { en: ["not hamburg but …", "… (in riso)", "hm …", "… softly"], de: ["kein hamburg aber …", "… (in riso)", "hm …", "… leise"] },
+    emojiRate: 0.15, emoji: ["🌫️", "🖨️"], typoRate: 0.04, msgLength: 28, lowercase: 1, chattiness: 0.4, reactRate: 0.35,
+    interests: ["riso", "print", "leipzig", "fog", "zine"], friends: ["u_yuki", "u_ida"], rivals: ["u_pia"],
+  },
+  u_can: {
+    typingCpm: 280, ...hours(ALWAYS), activeHours: [11, 24],
+    slang: { en: ["… ayran's on me", "bro …", "new spot: …", "free ayran."], de: ["… ayran geht auf mich", "bruder …", "neuer spot: …", "ayran umsonst."] },
+    emojiRate: 0.35, emoji: ["🌯", "🔥", "🚚"], typoRate: 0.08, msgLength: 30, lowercase: 0.9, chattiness: 0.7, reactRate: 0.2,
+    interests: ["food truck", "barmbek", "street food", "snack", "döner"], friends: ["u_kemal", "u_niko"], rivals: ["u_paul", "u_lea"],
+  },
+};
 
 const NPC_SEEDS: NpcSeed[] = [
   {
@@ -423,6 +633,10 @@ export const NPC_USERS: User[] = NPC_SEEDS.map((s) => ({
   selfDeaf: s.voice?.selfDeaf,
 }));
 
-export const NPC_PROFILES: NpcProfile[] = NPC_SEEDS.map((s) => ({ userId: s.id, ...s.profile }));
+export const NPC_PROFILES: NpcProfile[] = NPC_SEEDS.map((s) => {
+  const personality = PERSONALITIES[s.id];
+  if (!personality) throw new Error(`missing personality for ${s.id}`);
+  return { userId: s.id, ...s.profile, personality };
+});
 
 export const ALL_USERS: User[] = [ELIAS, DOORMAN, ...NPC_USERS];

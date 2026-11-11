@@ -13,6 +13,7 @@ import { BOT_ID, NPC_PROFILES } from "@/data/npcs";
 import { safetyCheck } from "@/lib/safety";
 import { expectedMessages, initialPlannerState, Planner, SIM_CHANNEL_WEIGHTS, type FloorEvent, type PlannerState, type World } from "@/lib/sim/planner";
 import { clampSettings, DEFAULT_SIM } from "@/lib/sim/settings";
+import { lowerChat, typingMs } from "@/lib/sim/style";
 import type { Message, SimSettings, User } from "@/lib/types";
 import { AI_TIMEOUT_MS, aiConfigured, liveReply, takeAiSlot } from "./ai";
 import { BUMP_REV, CURRENT_REV } from "./db";
@@ -58,7 +59,7 @@ export async function loadWorld(c: Db, now: number): Promise<Loaded> {
             FROM messages m WHERE channel_id IN (${q})) AS t WHERE rn <= 60 ORDER BY created_at ASC`,
       args: FLOOR_CHANNELS,
     }),
-    c.execute("SELECT content, content_en FROM messages ORDER BY created_at DESC LIMIT 100"),
+    c.execute("SELECT content, content_en FROM messages ORDER BY created_at DESC LIMIT 200"),
     c.execute({ sql: "SELECT channel_id FROM messages WHERE is_human = 1 AND created_at > ? ORDER BY created_at DESC LIMIT 1", args: [now - 15 * 60_000] }),
   ]);
   const row = sim.rows[0];
@@ -280,6 +281,17 @@ export async function scheduleReplies(c: Db, human: Message): Promise<(() => Pro
     const targets = live
       ? events.filter((e): e is MessageEvent => e.kind === "message" && e.message.replyToId === human.id).slice(0, max)
       : [];
+    // The model writes one message: a built-in burst it replaces goes out as one line (no follow-ups).
+    const groups = new Set(targets.map((t) => t.group).filter((g): g is string => !!g));
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.kind === "message" && e.group && groups.has(e.group) && (e.part ?? 0) > 0) events.splice(i, 1);
+    }
+    for (const t of targets) {
+      if (!t.whole) continue;
+      t.message.content = t.whole.mix;
+      t.message.i18n = { en: t.whole.en, de: t.whole.mix };
+    }
     const planned = new Map(targets.map((t) => [t, t.message.createdAt]));
     if (targets.length) holdForLiveReplies(events, targets[0]!, now);
     await c.batch(eventStatements(events, c.dialect), "write");
@@ -321,7 +333,7 @@ async function writeLiveReply(
 ) {
   const m = target.message;
   const npc = world.users.get(m.authorId);
-  const reply =
+  let reply =
     npc && (await takeAiSlot(c))
       ? await liveReply({
           npc,
@@ -345,10 +357,15 @@ async function writeLiveReply(
     });
     return;
   }
-  const german = Math.random() < (PROFILES.get(npc.id)?.germanRatio ?? 0);
+  const profile = PROFILES.get(npc.id);
+  const german = Math.random() < (profile?.germanRatio ?? 0);
+  // Same texting habit as the built-in lines: lowercase texters stay lowercase, no full stop.
+  const lower = Math.random();
+  const shape = (t: string) => (lower < (profile?.personality.lowercase ?? 0.85) ? lowerChat(t).replace(/(?<![.])\.$/, "") : t);
+  reply = { en: shape(reply.en), de: shape(reply.de) };
   const mix = german ? reply.de : reply.en;
   const at = Date.now();
-  const natural = Math.round(Math.min(3000, Math.max(500, 350 + mix.length * 28)) / Math.sqrt(Math.max(0.5, world.settings.activity)));
+  const natural = Math.round(Math.min(20_000, Math.max(900, typingMs(mix, profile?.personality, Math.random))));
   const createdAt = Math.round(Math.min(m.createdAt, Math.max(at + 400, typingStart + natural)));
   // Only while it's still invisible; if it already went out (or Backstage removed it), the built-in line stands.
   await c.execute({
