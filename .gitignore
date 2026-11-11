@@ -11,3 +11,4 @@ data/*.db-*
 data/seed.json
 dist
 .vercel
+/.claude/worktrees

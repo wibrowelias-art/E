@@ -4,25 +4,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { fixtureMessages } from "@/data/fixture";
 import { ALL_USERS } from "@/data/npcs";
-import { dividerDate, GROUP_WINDOW_MS, startOfDay } from "@/lib/format";
+import { clock, dividerDate, GROUP_WINDOW_MS, startOfDay } from "@/lib/format";
 import { mentionsUser, type MarkupContext } from "@/lib/markup";
 import { messageText, useCurrentChannel, useCurrentGuild, useLounge, useT } from "@/lib/store";
 import type { Message } from "@/lib/types";
-import { HashIcon } from "./icons";
+import { ArrowDownIcon, CheckAllIcon, HashIcon } from "./icons";
 import { MessageRow } from "./MessageRow";
 
 type Row =
   | { kind: "start"; key: string }
   | { kind: "loader"; key: string }
   | { kind: "sep"; key: string; day: number }
+  | { kind: "new"; key: string }
   | { kind: "msg"; key: string; message: Message; groupStart: boolean };
 
-function buildRows(messages: Message[], atStart: boolean): Row[] {
+function buildRows(messages: Message[], atStart: boolean, dividerAt: number | null, viewerId: string): Row[] {
   // The channel-start block is a row (not a Virtuoso Header) so it bottom-aligns with short histories.
   // While older history exists on the server, a loader row sits there instead.
   const rows: Row[] = [atStart ? { kind: "start", key: "start" } : { kind: "loader", key: "loader" }];
   let prev: Message | undefined;
   let prevDay = -1;
+  let dividerPlaced = dividerAt == null;
   for (const m of messages) {
     const day = startOfDay(m.createdAt);
     if (day !== prevDay) {
@@ -30,8 +32,14 @@ function buildRows(messages: Message[], atStart: boolean): Row[] {
       prevDay = day;
       prev = undefined;
     }
+    let forceGroup = false;
+    if (!dividerPlaced && m.createdAt > dividerAt! && m.authorId !== viewerId) {
+      rows.push({ kind: "new", key: "new-divider" });
+      dividerPlaced = true;
+      forceGroup = true;
+    }
     const groupStart =
-      !prev || prev.authorId !== m.authorId || m.createdAt - prev.createdAt > GROUP_WINDOW_MS || !!m.replyToId;
+      forceGroup || !prev || prev.authorId !== m.authorId || m.createdAt - prev.createdAt > GROUP_WINDOW_MS || !!m.replyToId;
     rows.push({ kind: "msg", key: m.id, message: m, groupStart });
     prev = m;
   }
@@ -114,7 +122,14 @@ function MessageListInner({ channelId }: { channelId: string }) {
   const retrySend = useLounge((s) => s.retrySend);
   const discardFailed = useLounge((s) => s.discardFailed);
   const atStart = fixture || !hist?.hasMore;
-  const rows = useMemo(() => buildRows(messages, atStart), [messages, atStart]);
+  const dividerAt = useLounge((s) => s.dividerAt[channelId] ?? null);
+  const markRead = useLounge((s) => s.markRead);
+  const seeCurrent = useLounge((s) => s.seeCurrent);
+  const rows = useMemo(() => buildRows(messages, atStart, dividerAt, viewerId), [messages, atStart, dividerAt, viewerId]);
+  const newCount = useMemo(
+    () => (dividerAt == null ? 0 : messages.filter((m) => m.createdAt > dividerAt && m.authorId !== viewerId).length),
+    [messages, dividerAt, viewerId],
+  );
   const firstSepKey = atStart ? rows.find((r) => r.kind === "sep")?.key : undefined;
 
   // Prepending older history: shift firstItemIndex by the rows inserted above the old first message.
@@ -135,7 +150,10 @@ function MessageListInner({ channelId }: { channelId: string }) {
     () => ({
       usersByName: new Map(ALL_USERS.map((u) => [u.displayName.toLowerCase(), u])),
       channelsByName: new Map(guild.channels.filter((c) => c.kind === "text").map((c) => [c.name, c])),
-      onMention: (u) => openProfile(u.id, { x: window.innerWidth / 2 - 150, y: 120 }),
+      onMention: (u, el) => {
+        const r = el.getBoundingClientRect();
+        openProfile(u.id, { x: r.left, y: r.bottom + 6 });
+      },
       onChannel: (c) => selectChannel(c.id),
     }),
     [guild, openProfile, selectChannel],
@@ -143,6 +161,10 @@ function MessageListInner({ channelId }: { channelId: string }) {
 
   const ref = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
+  // Reading at the bottom of a visible channel keeps it read.
+  useEffect(() => {
+    if (atBottom && !document.hidden) seeCurrent();
+  }, [atBottom, messages.length, seeCurrent]);
   // Pinned to the bottom until the human scrolls (rows re-measure after fonts/emoji load).
   const pinned = useRef(true);
   const userScrolled = () => {
@@ -257,6 +279,13 @@ function MessageListInner({ channelId }: { channelId: string }) {
               </div>
             );
           }
+          if (r.kind === "new") {
+            return (
+              <div className="newsep" role="separator" aria-label={t.newLabel}>
+                <span>{t.newLabel}</span>
+              </div>
+            );
+          }
           if (r.kind === "sep") {
             return (
               <div className={`datesep ${r.key === firstSepKey ? "datesep--first" : ""}`} role="separator">
@@ -298,10 +327,28 @@ function MessageListInner({ channelId }: { channelId: string }) {
           );
         }}
       />
+      {dividerAt != null && newCount > 0 && (
+        <div className="newbar" role="status">
+          <button
+            className="newbar__text"
+            onClick={() => {
+              const index = rows.findIndex((r) => r.kind === "new");
+              if (index >= 0) ref.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
+            }}
+          >
+            {t.newSince(newCount, clock(dividerAt, lang))}
+          </button>
+          <button className="newbar__btn" onClick={() => markRead(channelId)}>
+            {t.markAsRead} <CheckAllIcon size={15} />
+          </button>
+        </div>
+      )}
       {!atBottom && !pinned.current && (
         <button className="jump-bar" onClick={() => ref.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" })}>
           <span>{t.olderMessages}</span>
-          <span>{t.jumpToPresent} ↓</span>
+          <span className="flex items-center gap-1">
+            {t.jumpToPresent} <ArrowDownIcon size={15} />
+          </span>
         </button>
       )}
     </div>

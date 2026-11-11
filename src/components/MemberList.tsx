@@ -4,6 +4,7 @@ import { type MouseEvent } from "react";
 import { ROLES } from "@/data/npcs";
 import { useCurrentGuild, useLounge, useT } from "@/lib/store";
 import type { User } from "@/lib/types";
+import { useUi } from "@/lib/ui";
 import { Avatar } from "./Avatar";
 import { CrownIcon, StageWaveIcon } from "./icons";
 
@@ -15,6 +16,7 @@ function sortMembers(a: User, b: User) {
 
 function MemberRow({ user, voiceName }: { user: User; voiceName?: string }) {
   const openProfile = useLounge((s) => s.openProfile);
+  const openMenu = useUi((s) => s.openMenu);
   const t = useT();
   const color = user.presence === "offline" ? "var(--text-muted)" : (ROLES[user.roleId].color ?? "var(--text-strong)");
   const onClick = (e: MouseEvent) => {
@@ -23,7 +25,16 @@ function MemberRow({ user, voiceName }: { user: User; voiceName?: string }) {
   };
   const sub = voiceName ? t.inChannel(voiceName) : user.statusText ? `${user.statusEmoji ? `${user.statusEmoji} ` : ""}${user.statusText}` : null;
   return (
-    <button className="member" data-offline={user.presence === "offline"} onClick={onClick} aria-label={`${user.displayName}, ${user.presence}`}>
+    <button
+      className="member"
+      data-offline={user.presence === "offline"}
+      onClick={onClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openMenu({ x: e.clientX, y: e.clientY }, { kind: "user", id: user.id });
+      }}
+      aria-label={`${user.displayName}, ${user.presence}`}
+    >
       <Avatar user={user} size={32} status={user.presence !== "offline"} ring="var(--bg-base-low)" speaking={!!voiceName && user.speaking} />
       <span className="min-w-0 flex-1">
         <span className="member__name" style={{ color }}>
@@ -33,7 +44,7 @@ function MemberRow({ user, voiceName }: { user: User; voiceName?: string }) {
               <CrownIcon size={14} />
             </span>
           )}
-          {user.isBot && <span className="msg__tag" style={{ top: 0 }}>APP</span>}
+          {user.isBot && <span className="msg__tag" style={{ top: 0 }}>BOT</span>}
           {voiceName && user.speaking && (
             <span className="wave flex shrink-0">
               <StageWaveIcon size={12} />

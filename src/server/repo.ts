@@ -9,6 +9,7 @@ import { BUMP_REV, CURRENT_REV } from "./db";
 import { defer } from "./defer";
 import { backstageLog, LOOKAHEAD_MS, scheduleReplies } from "./floor";
 import { rowToUser } from "./rows";
+import { resolveAttachments } from "./uploads";
 
 export { rowToUser };
 
@@ -227,9 +228,11 @@ function rateLimit(s: Session) {
   buckets.set(s.uid, list);
 }
 
-function cleanText(raw: unknown): string {
+function cleanText(raw: unknown, allowEmpty = false): string {
+  if (raw === undefined && allowEmpty) return "";
   if (typeof raw !== "string") throw new ApiError(400, "Message must be text.");
   const text = raw.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
+  if (!text && allowEmpty) return "";
   if (!text) throw new ApiError(400, "Message is empty.");
   if (text.length > MAX_LEN) throw new ApiError(400, `Messages are limited to ${MAX_LEN} characters.`);
   const safe = safetyCheck(text);
@@ -237,12 +240,17 @@ function cleanText(raw: unknown): string {
   return text;
 }
 
-export async function postHuman(c: Db, s: Session, body: { channelId?: unknown; content?: unknown; replyToId?: unknown; clientId?: unknown }) {
+export async function postHuman(
+  c: Db,
+  s: Session,
+  body: { channelId?: unknown; content?: unknown; replyToId?: unknown; clientId?: unknown; attachments?: unknown },
+) {
   const channelId = String(body.channelId ?? "");
   if (!canPost(s, channelId)) {
     throw new ApiError(403, s.role === "tourist" ? "Guests can post in #introductions. Everything else is read-only for you." : "You can't post in this channel.");
   }
-  const content = cleanText(body.content);
+  const attachments = await resolveAttachments(c, s, body.attachments);
+  const content = cleanText(body.content, attachments.length > 0);
   rateLimit(s);
   await ensureGuest(c, s);
   let replyToId: string | null = null;
@@ -255,9 +263,9 @@ export async function postHuman(c: Db, s: Session, body: { channelId?: unknown; 
     [
       BUMP_REV,
       {
-        sql: `INSERT INTO messages (id, channel_id, author_id, content, created_at, reply_to_id, is_human, rev)
-              VALUES (?,?,?,?,?,?,1,${CURRENT_REV})`,
-        args: [id, channelId, s.uid, content, Date.now(), replyToId],
+        sql: `INSERT INTO messages (id, channel_id, author_id, content, created_at, reply_to_id, is_human, attachments_json, rev)
+              VALUES (?,?,?,?,?,?,1,?,${CURRENT_REV})`,
+        args: [id, channelId, s.uid, content, Date.now(), replyToId, attachments.length ? JSON.stringify(attachments) : null],
       },
     ],
     "write",

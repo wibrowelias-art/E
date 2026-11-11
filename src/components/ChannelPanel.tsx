@@ -6,6 +6,8 @@ import { ROLES } from "@/data/npcs";
 import { useCurrentChannel, useCurrentGuild, useLounge, useT } from "@/lib/store";
 import type { Category, Channel, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { UserPanel } from "./UserPanel";
+import { useUi } from "@/lib/ui";
 import {
   BadgeFlower,
   BellIcon,
@@ -37,6 +39,7 @@ export function ChannelPanel({ onNavigate }: { onNavigate: (channelId: string) =
       <div className="chanlist scroll-thin">
         <ChannelList isOwner={isOwner} onNavigate={onNavigate} />
       </div>
+      <UserPanel />
     </section>
   );
 }
@@ -103,6 +106,7 @@ function RealChannelList({ isOwner, onNavigate }: { isOwner: boolean; onNavigate
   const collapsed = useLounge((s) => s.collapsed);
   const toggleCategory = useLounge((s) => s.toggleCategory);
   const readState = useLounge((s) => s.readState);
+  const muted = useLounge((s) => s.mutedChannels);
 
   const uncategorised = guild.channels.filter((c) => !c.categoryId);
   const cats = guild.categories.filter((k) => !k.staffOnly || isOwner);
@@ -112,8 +116,9 @@ function RealChannelList({ isOwner, onNavigate }: { isOwner: boolean; onNavigate
       <ChannelRow
         channel={c}
         selected={c.id === current.id}
-        unread={!!readState[c.id]?.unread && c.id !== current.id}
+        unread={!!readState[c.id]?.unread && c.id !== current.id && !muted[c.id]}
         mentions={c.id === current.id ? 0 : (readState[c.id]?.mentions ?? 0)}
+        muted={!!muted[c.id]}
         onClick={() => c.kind === "text" && onNavigate(c.id)}
       />
       {c.kind === "voice" && <VoiceUsers channelId={c.id} />}
@@ -170,14 +175,17 @@ function ChannelRow({
   selected,
   unread,
   mentions,
+  muted,
   onClick,
 }: {
   channel: Channel;
   selected: boolean;
   unread: boolean;
   mentions: number;
+  muted?: boolean;
   onClick: () => void;
 }) {
+  const openMenu = useUi((s) => s.openMenu);
   const locked = channel.staffOnly || channel.locked;
   const t = useT();
   const Icon = locked ? LockIcon : channel.kind === "voice" ? SpeakerIcon : HashIcon;
@@ -187,7 +195,13 @@ function ChannelRow({
       className="chanrow"
       data-selected={selected}
       data-unread={unread}
+      data-muted={muted || undefined}
       onClick={onClick}
+      onContextMenu={(e) => {
+        if (channel.kind !== "text") return;
+        e.preventDefault();
+        openMenu({ x: e.clientX, y: e.clientY }, { kind: "channel", id: channel.id });
+      }}
       aria-current={selected ? "page" : undefined}
       aria-label={`${channel.kind === "voice" ? "voice channel" : "channel"} ${channel.name}${unread ? ", unread" : ""}${mentions ? `, ${mentions} mentions` : ""}`}
     >

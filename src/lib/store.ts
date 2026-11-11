@@ -9,7 +9,7 @@ import { api, ApiFailure } from "./api";
 import { LANG_STORAGE_KEY, STRINGS, type Lang } from "./i18n";
 import { safetyCheck, SAFETY_MESSAGE } from "./safety";
 import { clampSettings, DEFAULT_SIM, PRESETS, SIM_STORAGE_KEY } from "./sim/settings";
-import type { ChannelReadState, Message, RoleId, SimSettings, User } from "./types";
+import type { Attachment, ChannelReadState, Message, RoleId, SimSettings, User } from "./types";
 
 export interface SimLogEntry {
   at: number;
@@ -24,6 +24,24 @@ const MAX_MESSAGES = 3000;
 const HISTORY_PAGE = 120;
 /** Tourists (guests) may post here; everything else is read + react. */
 export const GUEST_POST_CHANNELS = new Set(["c_intros"]);
+
+const READ_KEY = (viewerId: string) => `lounge.read.${viewerId}`;
+const MUTED_KEY = "lounge.mutedChannels";
+
+function loadJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function mentionsViewer(m: Message, viewer?: User): boolean {
+  if (!viewer) return false;
+  const text = m.i18n?.en ?? m.content;
+  return new RegExp(`@${viewer.displayName}\\b`, "i").test(text);
+}
 
 function persist(key: string, value: unknown) {
   try {
@@ -87,6 +105,11 @@ interface LoungeState {
   users: Record<string, User>;
   messages: Message[];
   readState: Record<string, ChannelReadState>;
+  /** Last time each channel was read (ms), persisted per viewer on this device. */
+  lastRead: Record<string, number>;
+  /** Where the "NEW" divider sits in a channel (shown until Esc / leaving / mark read). */
+  dividerAt: Record<string, number | null>;
+  mutedChannels: Record<string, boolean>;
   typing: Record<string, string[]>;
   guildId: string;
   channelByGuild: Record<string, string>;
@@ -113,11 +136,16 @@ interface LoungeState {
   loadOlder: (channelId: string) => Promise<void>;
   selectGuild: (guildId: string) => void;
   selectChannel: (channelId: string, opts?: { openChat?: boolean }) => void;
+  markRead: (channelId: string) => void;
+  markUnread: (messageId: string) => void;
+  toggleMuteChannel: (channelId: string) => void;
+  /** The current channel is on screen and the window is visible: advance its read marker. */
+  seeCurrent: () => void;
   setMobilePane: (p: MobilePane) => void;
   toggleMembers: (open?: boolean) => void;
   toggleCategory: (categoryId: string) => void;
   canPost: (channelId: string) => boolean;
-  send: (channelId: string, content: string) => void;
+  send: (channelId: string, content: string, attachments?: Attachment[]) => void;
   retrySend: (tempId: string) => void;
   discardFailed: (tempId: string) => void;
   startEdit: (messageId: string | null) => void;
@@ -168,6 +196,9 @@ export const useLounge = create<LoungeState>((set, get) => ({
   users: {},
   messages: [],
   readState: { ...SEED_READ_STATE },
+  lastRead: {},
+  dividerAt: {},
+  mutedChannels: {},
   typing: { ...SEED_TYPING },
   guildId: DEFAULT_GUILD_ID,
   channelByGuild: Object.fromEntries(
@@ -215,6 +246,24 @@ export const useLounge = create<LoungeState>((set, get) => ({
     for (const g of GUILDS) for (const c of g.channels) history[c.id] = { hasMore: (perChannel.get(c.id) ?? 0) >= HISTORY_PAGE, loading: false };
     const users = Object.fromEntries((res.users ?? []).map((u) => [u.id, u]));
     users[res.viewer.id] ??= res.viewer;
+    // Unread state from this device's read markers (first visit: everything counts as read).
+    const stored = loadJson<Record<string, number> | null>(READ_KEY(res.viewer.id), null);
+    const lastRead: Record<string, number> = {};
+    const readState: Record<string, ChannelReadState> = {};
+    const bootNow = Date.now();
+    for (const g of GUILDS)
+      for (const c of g.channels) {
+        const mark = stored?.[c.id] ?? bootNow;
+        lastRead[c.id] = mark;
+        const fresh = messages.filter((m) => m.channelId === c.id && m.createdAt > mark && m.authorId !== res.viewer.id);
+        if (fresh.length) readState[c.id] = { unread: true, mentions: fresh.filter((m) => mentionsViewer(m, users[res.viewer.id])).length };
+      }
+    const current = get().channelByGuild[get().guildId]!;
+    const firstNew = messages.find((m) => m.channelId === current && m.createdAt > lastRead[current]! && m.authorId !== res.viewer.id);
+    const dividerAt = { [current]: firstNew ? lastRead[current]! : null };
+    lastRead[current] = bootNow;
+    delete readState[current];
+    persist(READ_KEY(res.viewer.id), lastRead);
     set({
       ready: true,
       now: Date.now(),
@@ -225,8 +274,10 @@ export const useLounge = create<LoungeState>((set, get) => ({
       history,
       rev: res.rev ?? 0,
       serverNow: res.serverNow ?? Date.now(),
-      // Seeded read state was a static fake; real unread comes from the poll. Typing comes from the server floor.
-      readState: {},
+      readState,
+      lastRead,
+      dividerAt,
+      mutedChannels: loadJson<Record<string, boolean>>(MUTED_KEY, {}),
       typing: typingMap(res.typing ?? []),
       ...(res.sim ? { sim: clampSettings({ ...res.sim, paused: res.sim.paused }) } : {}),
     });
@@ -250,18 +301,24 @@ export const useLounge = create<LoungeState>((set, get) => ({
         if (i !== undefined) messages[i] = { ...m, pending: undefined, failed: undefined };
         else fresh.push(m);
       }
-      const current = s.channelByGuild[s.guildId];
+      const current = s.channelByGuild[s.guildId]!;
       const viewer = s.users[s.viewerId];
       const readState = { ...s.readState };
+      let lastRead = s.lastRead;
+      let dividerAt = s.dividerAt;
       for (const m of fresh) {
         if (m.authorId === s.viewerId) continue;
         const visible = m.channelId === current && !document.hidden;
-        if (visible) continue;
+        if (visible) {
+          lastRead = { ...lastRead, [current]: Math.max(lastRead[current] ?? 0, m.createdAt) };
+          continue;
+        }
+        // Arrived while the tab was in the background: the divider marks where you left off.
+        if (m.channelId === current && dividerAt[current] == null) dividerAt = { ...dividerAt, [current]: lastRead[current] ?? m.createdAt - 1 };
         const prev = readState[m.channelId] ?? { unread: false, mentions: 0 };
-        const text = m.i18n?.en ?? m.content;
-        const mentioned = viewer ? new RegExp(`@${viewer.displayName}\\b`, "i").test(text) : false;
-        readState[m.channelId] = { unread: true, mentions: prev.mentions + (mentioned ? 1 : 0) };
+        readState[m.channelId] = { unread: true, mentions: prev.mentions + (mentionsViewer(m, viewer) ? 1 : 0) };
       }
+      if (lastRead !== s.lastRead) persist(READ_KEY(s.viewerId), lastRead);
       const nextUsers = users.length ? { ...s.users, ...Object.fromEntries(users.map((u) => [u.id, u])) } : s.users;
       // Backstage live feed: what the server floor just published.
       const floorLines = fresh
@@ -274,6 +331,8 @@ export const useLounge = create<LoungeState>((set, get) => ({
         rev: Math.max(s.rev, rev),
         serverNow: serverNow ?? s.serverNow,
         readState,
+        lastRead,
+        dividerAt,
         now: Date.now(),
         ...(typing ? { typing: typingMap(typing) } : {}),
         ...(floorLines.length ? { simLog: [...floorLines, ...s.simLog].slice(0, 12) } : {}),
@@ -306,13 +365,65 @@ export const useLounge = create<LoungeState>((set, get) => ({
   selectGuild: (guildId) => set({ guildId }),
 
   selectChannel: (channelId, opts) =>
-    set((s) => ({
-      channelByGuild: { ...s.channelByGuild, [s.guildId]: channelId },
-      readState: { ...s.readState, [channelId]: { unread: false, mentions: 0 } },
-      mobilePane: opts?.openChat === false ? s.mobilePane : "chat",
-      editingId: null,
-      replyingToId: null,
-    })),
+    set((s) => {
+      const mark = s.lastRead[channelId] ?? 0;
+      const hasNew = s.messages.some((m) => m.channelId === channelId && m.createdAt > mark && m.authorId !== s.viewerId);
+      const previous = s.channelByGuild[s.guildId];
+      const lastRead = { ...s.lastRead, [channelId]: Date.now() };
+      if (s.ready && s.persistence) persist(READ_KEY(s.viewerId), lastRead);
+      return {
+        channelByGuild: { ...s.channelByGuild, [s.guildId]: channelId },
+        readState: { ...s.readState, [channelId]: { unread: false, mentions: 0 } },
+        // Leaving a channel clears its divider; entering one with unread shows where you left off.
+        dividerAt: { ...s.dividerAt, ...(previous && previous !== channelId ? { [previous]: null } : {}), [channelId]: hasNew && mark ? mark : null },
+        lastRead,
+        mobilePane: opts?.openChat === false ? s.mobilePane : "chat",
+        editingId: null,
+        replyingToId: null,
+      };
+    }),
+
+  markRead: (channelId) =>
+    set((s) => {
+      const lastRead = { ...s.lastRead, [channelId]: Date.now() };
+      persist(READ_KEY(s.viewerId), lastRead);
+      return { lastRead, dividerAt: { ...s.dividerAt, [channelId]: null }, readState: { ...s.readState, [channelId]: { unread: false, mentions: 0 } } };
+    }),
+
+  markUnread: (messageId) =>
+    set((s) => {
+      const m = s.messages.find((x) => x.id === messageId);
+      if (!m) return {};
+      const at = m.createdAt - 1;
+      const lastRead = { ...s.lastRead, [m.channelId]: at };
+      persist(READ_KEY(s.viewerId), lastRead);
+      const later = s.messages.filter((x) => x.channelId === m.channelId && x.createdAt > at && x.authorId !== s.viewerId);
+      return {
+        lastRead,
+        dividerAt: { ...s.dividerAt, [m.channelId]: at },
+        readState: { ...s.readState, [m.channelId]: { unread: later.length > 0, mentions: later.filter((x) => mentionsViewer(x, s.users[s.viewerId])).length } },
+      };
+    }),
+
+  toggleMuteChannel: (channelId) =>
+    set((s) => {
+      const mutedChannels = { ...s.mutedChannels, [channelId]: !s.mutedChannels[channelId] };
+      persist(MUTED_KEY, mutedChannels);
+      return { mutedChannels };
+    }),
+
+  seeCurrent: () => {
+    const s = get();
+    const current = s.channelByGuild[s.guildId]!;
+    const rs = s.readState[current];
+    if (rs?.unread || rs?.mentions) set({ readState: { ...s.readState, [current]: { unread: false, mentions: 0 } } });
+    const latest = s.messages.reduce((t, m) => (m.channelId === current && m.createdAt <= Date.now() ? Math.max(t, m.createdAt) : t), 0);
+    if (latest > (s.lastRead[current] ?? 0)) {
+      const lastRead = { ...s.lastRead, [current]: latest };
+      if (s.persistence) persist(READ_KEY(s.viewerId), lastRead);
+      set({ lastRead });
+    }
+  },
 
   setMobilePane: (mobilePane) => set({ mobilePane }),
   toggleMembers: (open) => set((s) => ({ membersOpen: open ?? !s.membersOpen })),
@@ -326,12 +437,12 @@ export const useLounge = create<LoungeState>((set, get) => ({
     return s.role !== "tourist" || GUEST_POST_CHANNELS.has(channelId);
   },
 
-  send: (channelId, content) => {
+  send: (channelId, content, attachments) => {
     const text = content.trim();
-    if (!text) return;
+    if (!text && !attachments?.length) return;
     const s = get();
     if (!s.canPost(channelId)) return s.showToast("Guests can post in #introductions — everything else is read-only for you.");
-    const safe = safetyCheck(text);
+    const safe = text ? safetyCheck(text) : ({ ok: true } as const);
     if (!safe.ok) return s.showToast(SAFETY_MESSAGE[safe.reason]);
     const temp: Message = {
       id: `m_local_${Date.now()}_${localSeq++}`,
@@ -341,11 +452,12 @@ export const useLounge = create<LoungeState>((set, get) => ({
       createdAt: Date.now(),
       replyToId: s.replyingToId ?? undefined,
       isHuman: true,
+      attachments: attachments?.length ? attachments : undefined,
       pending: s.persistence || undefined,
     };
     set({ messages: [...s.messages, temp], replyingToId: null, now: Date.now() });
     if (!s.persistence) return;
-    void api<{ message: Message }>("/api/messages", { body: { channelId, content: text, replyToId: temp.replyToId } })
+    void api<{ message: Message }>("/api/messages", { body: { channelId, content: text, replyToId: temp.replyToId, attachments: attachments?.map((a) => ({ id: a.id })) } })
       .then(({ message }) =>
         set((st) => ({
           // The poll may already have delivered it; keep one copy.
@@ -365,7 +477,7 @@ export const useLounge = create<LoungeState>((set, get) => ({
     const m = get().messages.find((x) => x.id === tempId);
     if (!m) return;
     set((st) => ({ messages: st.messages.filter((x) => x.id !== tempId), replyingToId: m.replyToId ?? null }));
-    get().send(m.channelId, m.content);
+    get().send(m.channelId, m.content, m.attachments);
   },
 
   discardFailed: (tempId) => set((st) => ({ messages: st.messages.filter((x) => x.id !== tempId) })),

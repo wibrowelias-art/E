@@ -67,10 +67,16 @@ try {
   await page.waitForSelector(".msg");
   ok((await page.locator(".msg").last().innerText()).includes("edited text(edited)"), "after reload: the message and its edit are still there (persisted)");
 
-  const reaction = page.locator(".reaction").first();
-  const before = await reaction.innerText();
+  // React from the hover toolbar, then toggle it off again from the chip.
+  const lastMsg = page.locator(".msg").last();
+  await lastMsg.hover();
+  await lastMsg.locator(".quick-react").first().click();
+  const reaction = lastMsg.locator(".reaction:not(.reaction--add)").first();
+  await reaction.waitFor();
+  ok((await reaction.getAttribute("data-me")) === "true", "hover toolbar adds a reaction");
   await reaction.click();
-  ok((await reaction.innerText()) !== before, "reaction toggles count");
+  await page.waitForTimeout(200);
+  ok((await lastMsg.locator(".reaction:not(.reaction--add)").count()) === 0, "reaction toggles off again");
 
   await page.locator(".chanrow", { hasText: "hamburg-night" }).first().click();
   await page.waitForTimeout(400);
@@ -97,8 +103,8 @@ try {
   const english = await page.locator(".msglist").innerText();
   ok(english.includes("just got off night shift") && !english.includes("nachtschicht"), "English: backlog fully English");
 
-  // Backstage: opens from the title bar, sliders + preset + reset persist.
-  await page.locator('.titlebar [aria-label="Backstage"]').click();
+  // Backstage: opens from the chat header, sliders + preset + reset persist.
+  await page.locator('.chat-head [aria-label="Backstage"]').click();
   ok(await page.locator(".bs").isVisible(), "Backstage opens");
   await page.locator(".bs-preset", { hasText: "Roast night" }).click();
   ok((await page.locator(".bs-slider__value").nth(1).innerText()) === "15%", "preset sets glaze ratio");
@@ -119,7 +125,7 @@ try {
   await g.goto(`${BASE}/channels/lounge/general?sim=off&lang=en&debug`, { waitUntil: "networkidle" });
   await g.waitForSelector(".msg");
   ok(await g.locator(".composer__readonly").isVisible(), "guest: #general composer is read-only");
-  ok((await g.locator('.titlebar [aria-label="Backstage"]').count()) === 0, "guest: no Backstage button");
+  ok((await g.locator('.chat-head [aria-label="Backstage"]').count()) === 0, "guest: no Backstage button");
   ok((await g.locator(".chanrow", { hasText: "ops" }).count()) === 0, "guest: staff channels hidden");
   await g.locator(".chanrow", { hasText: "introductions" }).first().click();
   const gi = g.locator(".composer__input");

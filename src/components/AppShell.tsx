@@ -6,48 +6,21 @@ import { api } from "@/lib/api";
 import { useSimulation } from "@/lib/sim/engine";
 import type { TypingEntry } from "@/lib/store";
 import type { Message, User } from "@/lib/types";
-import { useCurrentGuild, useLounge, type MobilePane } from "@/lib/store";
+import { useLounge, type MobilePane } from "@/lib/store";
+import { useUi } from "@/lib/ui";
 import { Backstage } from "./Backstage";
 import { SettingsMenu } from "./SettingsMenu";
-import { GuildGlyph } from "./Brand";
 import { ChannelPanel, MobileUserCard } from "./ChannelPanel";
 import { Chat } from "./Chat";
-import { HelpIcon, InboxIcon, SlidersIcon } from "./icons";
+import { EmojiPicker } from "./EmojiPicker";
+import { ContextMenu, Lightbox } from "./Overlays";
 import { ProfilePopout } from "./ProfilePopout";
 import { ServerRail } from "./ServerRail";
-import { UserPanel } from "./UserPanel";
 
 interface Props {
   guildSlug?: string;
   channelName?: string;
   initialPane: MobilePane;
-}
-
-function TitleBar() {
-  const guild = useCurrentGuild();
-  const openBackstage = useLounge((s) => s.openBackstage);
-  const isOwner = useLounge((s) => s.role === "owner");
-  return (
-    <div className="titlebar">
-      <span className="titlebar__icon [&>svg]:h-full [&>svg]:w-full">
-        <GuildGlyph guild={guild} size={18} />
-      </span>
-      <span>{guild.name}</span>
-      <div className="titlebar__right">
-        {isOwner && (
-          <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Backstage" title="Backstage" onClick={() => openBackstage(true)}>
-            <SlidersIcon size={19} />
-          </button>
-        )}
-        <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Inbox">
-          <InboxIcon size={20} />
-        </button>
-        <button className="iconbtn" style={{ width: 28, height: 28 }} aria-label="Help">
-          <HelpIcon size={20} />
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function Toast() {
@@ -175,21 +148,29 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
     if (ch) window.history.pushState(null, "", `/channels/${GUILD_SLUG_BY_ID[guild.id]}/${ch.name}${window.location.search}`);
   }, []);
 
-  // Global keyboard: Esc closes popouts / reply / edit / drawers.
+  // Global keyboard: Esc closes the top-most overlay; with nothing open it marks the channel read.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (useUi.getState().closeTop()) return;
       const st = useLounge.getState();
       if (st.closeOverlays()) return;
-      if (st.membersOpen && window.innerWidth < 1200) st.toggleMembers(false);
+      if (st.membersOpen && window.innerWidth < 1200) return st.toggleMembers(false);
+      st.markRead(st.channelByGuild[st.guildId]!);
+    };
+    const onVisible = () => {
+      if (!document.hidden) useLounge.getState().seeCurrent();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   return (
     <div className="app" data-pane={mobilePane} data-members={membersOpen} data-frame={frame}>
-      <TitleBar />
       <div className="app-body">
         <nav className="nav" aria-label="Servers and channels">
           <ServerRail />
@@ -198,8 +179,10 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
         </nav>
         <Chat />
       </div>
-      <UserPanel />
       <ProfilePopout />
+      <ContextMenu />
+      <EmojiPicker />
+      <Lightbox />
       <SettingsMenu />
       <Backstage />
       <Toast />

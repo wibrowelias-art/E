@@ -115,8 +115,11 @@ export interface Attachment {
   filename: string;
   width: number;
   height: number;
-  /** Generated CSS art (gradient stops) instead of real photos. */
-  palette: [string, string, string];
+  /** Generated CSS art (gradient stops) for seeded "photos". */
+  palette?: [string, string, string];
+  /** Uploaded image / GIF (served from /api/uploads/<id>). */
+  url?: string;
+  mime?: string;
 }
 
 export interface Message {

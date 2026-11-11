@@ -10,7 +10,7 @@ export const ROLES: Record<RoleId, Role> = {
   inner: { id: "inner", name: "Inner Circle", color: "#ec8fb8" },
   regular: { id: "regular", name: "Regular", color: "#8fb4f0" },
   tourist: { id: "tourist", name: "Tourist", color: null },
-  bot: { id: "bot", name: "Bot", color: "#7d8ee8" },
+  bot: { id: "bot", name: "Bot", color: "#5ec4b6" },
 };
 
 export const OWNER_ID = "u_elias";
