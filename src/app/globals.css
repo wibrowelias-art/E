@@ -3732,3 +3732,20 @@ button {
     scrollbar-width: thin;
   }
 }
+@layer components {
+  @media (max-width: 767px) {
+    .msg {
+      -webkit-touch-callout: none;
+    }
+    .msg__toolbar {
+      display: none !important;
+    }
+    .cm {
+      min-width: 240px;
+    }
+    .cm__item {
+      height: 40px;
+      font-size: 15px;
+    }
+  }
+}

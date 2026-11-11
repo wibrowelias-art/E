@@ -38,6 +38,7 @@ export interface MessageRowProps {
 }
 
 const QUICK = ["🔥", "😭", "🫶"];
+let pressTimer: ReturnType<typeof setTimeout> | undefined;
 
 interface Preview {
   url: string;
@@ -208,6 +209,19 @@ export const MessageRow = memo(function MessageRow(p: MessageRowProps) {
         e.preventDefault();
         openMenu({ x: e.clientX, y: e.clientY }, { kind: "message", id: message.id });
       }}
+      onTouchStart={(e) => {
+        // Phones: long-press opens the same menu.
+        if (p.editing || (e.target as HTMLElement).closest("a, textarea, button")) return;
+        const t0 = e.touches[0]!;
+        const at = { x: t0.clientX, y: t0.clientY };
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+          navigator.vibrate?.(8);
+          openMenu(at, { kind: "message", id: message.id });
+        }, 480);
+      }}
+      onTouchMove={() => clearTimeout(pressTimer)}
+      onTouchEnd={() => clearTimeout(pressTimer)}
       data-pending={message.pending || undefined}
       data-failed={message.failed ? true : undefined}
       id={`msg-${message.id}`}
