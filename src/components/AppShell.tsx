@@ -15,6 +15,8 @@ import { Chat } from "./Chat";
 import { EmojiPicker } from "./EmojiPicker";
 import { ContextMenu, Lightbox } from "./Overlays";
 import { ProfilePopout } from "./ProfilePopout";
+import { QuickSwitcher } from "./QuickSwitcher";
+import { primeAudio, startNotifier, useFeel } from "@/lib/feel";
 import { ServerRail } from "./ServerRail";
 
 interface Props {
@@ -148,6 +150,48 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
     if (ch) window.history.pushState(null, "", `/channels/${GUILD_SLUG_BY_ID[guild.id]}/${ch.name}${window.location.search}`);
   }, []);
 
+  /** Go to a channel in any guild (quick switcher, notifications). */
+  const goTo = useCallback((guildId: string, channelId: string) => {
+    const st = useLounge.getState();
+    if (st.guildId !== guildId) st.selectGuild(guildId);
+    const guild = GUILDS.find((g) => g.id === guildId)!;
+    const ch = guild.channels.find((c) => c.id === channelId);
+    useLounge.getState().selectChannel(channelId);
+    if (ch) window.history.pushState(null, "", `/channels/${GUILD_SLUG_BY_ID[guild.id]}/${ch.name}${window.location.search}`);
+  }, []);
+
+  // Sounds + mention notifications once the history is loaded.
+  useEffect(() => {
+    if (!ready) return;
+    useFeel.getState().load();
+    primeAudio();
+    return startNotifier(goTo);
+  }, [ready, goTo]);
+
+  // Shortcuts: Ctrl/⌘+K quick switcher, Alt+↑/↓ previous/next channel.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        useUi.getState().setSwitcher(!useUi.getState().switcher);
+        return;
+      }
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        const st = useLounge.getState();
+        const guild = GUILDS.find((g) => g.id === st.guildId)!;
+        const list = guild.channels.filter((c) => c.kind === "text" && (!c.staffOnly || st.role === "owner"));
+        const i = list.findIndex((c) => c.id === st.channelByGuild[st.guildId]);
+        const next = list[(i + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length];
+        if (next) {
+          e.preventDefault();
+          navigate(next.id);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
+
   // Global keyboard: Esc closes the top-most overlay; with nothing open it marks the channel read.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -183,6 +227,7 @@ export function AppShell({ guildSlug, channelName, initialPane }: Props) {
       <ContextMenu />
       <EmojiPicker />
       <Lightbox />
+      <QuickSwitcher onGo={goTo} />
       <SettingsMenu />
       <Backstage />
       <Toast />

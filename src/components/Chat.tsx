@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import type { Attachment } from "@/lib/types";
 import { useUi } from "@/lib/ui";
+import { playSound } from "@/lib/feel";
 import { prepareImage, UploadError, uploadImage } from "@/lib/upload";
 import { useCurrentChannel, useCurrentGuild, useLounge, useT } from "@/lib/store";
 import type { Strings } from "@/lib/i18n";
@@ -147,6 +148,7 @@ function useComposer() {
   const submit = () => {
     if (!canSend) return;
     send(channel.id, value, pending.map((p) => p.attachment!).filter(Boolean));
+    playSound("sent");
     setValue("");
     setFiles((f) => ({ ...f, [channel.id]: [] }));
   };
@@ -425,7 +427,15 @@ function DesktopHeader() {
           <MembersIcon size={20} />
         </button>
         <label className="chat-search">
-          <input placeholder={t.searchGuild(guild.name)} aria-label={t.search} />
+          <input
+            placeholder={`${t.search} · Ctrl K`}
+            aria-label={t.search}
+            readOnly
+            onFocus={(e) => {
+              e.currentTarget.blur();
+              useUi.getState().setSwitcher(true);
+            }}
+          />
           <SearchIcon size={15} />
         </label>
         {isOwner && (
@@ -459,7 +469,7 @@ function MobileHeader() {
           <ChevronRight size={17} />
         </span>
       </button>
-      <button className="mchat-head__search" aria-label="Search">
+      <button className="mchat-head__search" aria-label="Search" onClick={() => useUi.getState().setSwitcher(true)}>
         <SearchIcon size={21} />
       </button>
     </header>

@@ -191,6 +191,20 @@ function MessageListInner({ channelId }: { channelId: string }) {
       ro.disconnect();
     };
   }, [repin]);
+  /** Scroll to the newest message and stay pinned (item heights settle on the way down). */
+  const jumpToPresent = useCallback(() => {
+    const el = scroller.current;
+    pinned.current = true;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    for (const ms of [250, 500, 800, 1100]) {
+      setTimeout(() => {
+        if (!pinned.current || !scroller.current) return;
+        const s = scroller.current;
+        if (s.scrollHeight - s.scrollTop - s.clientHeight > 4) s.scrollTo({ top: s.scrollHeight, behavior: ms < 800 ? "smooth" : "auto" });
+      }, ms);
+    }
+  }, []);
   const [stickyDay, setStickyDay] = useState<number | null>(null);
   const [showSticky, setShowSticky] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -199,9 +213,9 @@ function MessageListInner({ channelId }: { channelId: string }) {
   const lastMsg = messages[messages.length - 1];
   useEffect(() => {
     if (lastMsg?.authorId === viewerId && lastMsg.id.startsWith("m_local_")) {
-      requestAnimationFrame(() => ref.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" }));
+      requestAnimationFrame(jumpToPresent);
     }
-  }, [lastMsg, viewerId]);
+  }, [lastMsg, viewerId, jumpToPresent]);
 
   const onRange = useCallback(
     ({ startIndex }: { startIndex: number }) => {
@@ -344,7 +358,7 @@ function MessageListInner({ channelId }: { channelId: string }) {
         </div>
       )}
       {!atBottom && !pinned.current && (
-        <button className="jump-bar" onClick={() => ref.current?.scrollToIndex({ index: "LAST", behavior: "smooth", align: "end" })}>
+        <button className="jump-bar" onClick={jumpToPresent}>
           <span>{t.olderMessages}</span>
           <span className="flex items-center gap-1">
             {t.jumpToPresent} <ArrowDownIcon size={15} />
