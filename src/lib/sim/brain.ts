@@ -1,13 +1,14 @@
 /**
  * Stub brain: turns Backstage settings + persona into one chat line, in both
  * languages at once (so the language switch can re-render it later).
- * Phase 4 swaps `composeLine` for a ChatProvider call when an AI key exists.
+ * Each line is then run through the author's texting style (./style.ts).
  */
 import { fingerprint } from "@/data/seed";
 import { safetyCheck } from "@/lib/safety";
 import type { Lang } from "@/lib/i18n";
 import type { NpcProfile, SimSettings, User } from "@/lib/types";
-import { BANKS, SLOTS, type Category, type Line } from "./banks";
+import { BANKS, SLOTS, VLOG_PROMISED_AT, type Category, type GagId, type Line } from "./banks";
+import { humanize } from "./style";
 import { DEFAULT_SIM } from "./settings";
 
 const DEFAULT_PROMPT = DEFAULT_SIM.prompt;
@@ -95,10 +96,17 @@ export function eliasCategory(glaze: number, rng: Rng): Category {
 /** A prompt the owner wrote themselves steers harder than the default vibe. */
 export function promptWeight(s: SimSettings, hasTopics: boolean): number {
   if (!hasTopics) return 0;
-  return s.prompt.trim() === DEFAULT_PROMPT.trim() ? 0.3 : 0.55;
+  return s.prompt.trim() === DEFAULT_PROMPT.trim() ? 0.3 : 0.65;
 }
 
-export function freshCategory(s: SimSettings, e: Effective, hasTopics: boolean, rng: Rng): Category {
+
+export function freshCategory(
+  s: SimSettings,
+  e: Effective,
+  hasTopics: boolean,
+  rng: Rng,
+  extra: { lore?: boolean; callback?: boolean } = {},
+): Category {
   const bucket = weighted(
     {
       elias: 0.46,
@@ -107,6 +115,9 @@ export function freshCategory(s: SimSettings, e: Effective, hasTopics: boolean, 
       prompt: promptWeight(s, hasTopics),
       meta: s.breakCharacter ? 0.08 : 0,
       topic: 0.36,
+      // Server lore (running gags) and callbacks to earlier lines.
+      lore: extra.lore ? 0.1 : 0,
+      callback: extra.callback ? 0.07 : 0,
     },
     rng,
   );
@@ -121,7 +132,7 @@ export function replyCategory(e: Effective, parentTag: string | undefined, rng: 
   return weighted(
     {
       agree: 0.4 - mismatch * 0.25,
-      laugh: parentTag === "drama" || parentTag === "roast" ? 0.35 : 0.22,
+      laugh: parentTag === "drama" || parentTag === "roast" || parentTag?.startsWith("lore") ? 0.35 : 0.22,
       question: parentTag === "drama" ? 0.25 : 0.12,
       disagree: 0.08 + e.drama * 0.45 + mismatch * 0.35,
     },
@@ -133,42 +144,13 @@ export function ownerReplyCategory(e: Effective, rng: Rng): Category {
   return weighted({ ownerPos: e.glaze, ownerNeg: (1 - e.glaze) * 0.85, ownerNeutral: 0.2 }, rng);
 }
 
-/* ───────────── persona styles ───────────── */
-
-interface Style {
-  emoji?: [string[], number];
-  caps?: number;
-  noEmoji?: boolean;
-  proper?: boolean;
-  typo?: number;
-}
-const STYLE: Record<string, Style> = {
-  u_mara: { emoji: [["😭😭", "🔥🔥", "🌅", "✨✨"], 0.35] },
-  u_ben: { emoji: [["💪", "🔥", "💪🔥"], 0.5] },
-  u_kemal: { emoji: [["💀"], 0.3] },
-  u_pia: { caps: 0.12, emoji: [["😭", "😩"], 0.35] },
-  u_leni: { caps: 0.18 },
-  u_jule: { emoji: [["😩", "✨"], 0.3] },
-  u_hanna: { emoji: [["✨"], 0.2] },
-  u_noor: { noEmoji: true },
-  u_theo: { proper: true, noEmoji: true },
-  u_zara: { proper: true },
-  u_sofia: { proper: true },
-  u_finn: { typo: 0.18 },
-  u_vincent: { emoji: [["💸"], 0.15] },
-};
-
-const EMOJI_RE = /\p{Extended_Pictographic}[\u{FE0F}\u{200D}\p{Extended_Pictographic}]*/gu;
-const ENDS_WITH_EMOJI = /\p{Extended_Pictographic}\uFE0F?$/u;
-
-function typoOnce(text: string, at: number): string {
-  const words = text.split(" ");
-  const idx = words.findIndex((w, i) => i >= at % Math.max(1, words.length) && /^[a-zäöü]{5,}$/.test(w));
-  if (idx < 0) return text;
-  const w = words[idx]!;
-  const p = 1 + (at % (w.length - 2));
-  words[idx] = w.slice(0, p) + w[p + 1] + w[p] + w.slice(p + 2);
-  return words.join(" ");
+/** What someone says when the owner (or a guest) posts: answers to questions, quick reactions, opinions. */
+export function humanReplyCategory(e: Effective, question: boolean, rng: Rng): Category {
+  if (question) {
+    const r = rng();
+    return r < 0.45 ? "answer" : r < 0.65 ? "short" : ownerReplyCategory(e, rng);
+  }
+  return rng() < 0.6 ? ownerReplyCategory(e, rng) : "short";
 }
 
 /* ───────────── composition ───────────── */
@@ -188,6 +170,12 @@ export interface ComposeInput {
   avoid: readonly string[];
   /** Recent lines (English), newest last — near-duplicate guard. */
   recentTexts?: readonly string[];
+  /** Running gag to reference (category "lore"). */
+  gag?: GagId;
+  /** Fragment of an earlier line (category "callback"), per language. */
+  quote?: { en: string; de: string };
+  /** Floor time of the line (the vlog counter grows with it). */
+  now?: number;
   rng: Rng;
 }
 
@@ -213,13 +201,22 @@ export function uniqKey(text: string): string {
   return fp.length > 3 ? fp : `raw:${text.trim()}`;
 }
 
-export interface Composed {
+export interface ComposedPart {
   en: string;
   de: string;
-  /** Version shown in "Deutsch" mode (German or English depending on the persona). */
+  /** What's shown in "Deutsch" mode (German or English, following the persona). */
   mix: string;
+}
+
+export interface Composed extends ComposedPart {
   category: Category;
   template: string;
+  /** The line as this person sends it: 1–3 messages in a row … */
+  parts: ComposedPart[];
+  /** … and maybe a typo fix right after `parts[fix.after]`. */
+  fix?: ComposedPart & { after: number };
+  /** Running gag referenced, if any. */
+  gag?: GagId;
 }
 
 function linesFor(category: Category, channelId: string, rng: Rng): Array<{ line: Line; key: string }> {
@@ -229,9 +226,12 @@ function linesFor(category: Category, channelId: string, rng: Rng): Array<{ line
   return local.length && rng() < 0.85 ? local : bank;
 }
 
+export function vlogDay(now: number): number {
+  return Math.max(1, Math.floor((now - VLOG_PROMISED_AT) / 86_400_000));
+}
+
 export function composeLine(input: ComposeInput): Composed | null {
   const { category, rng } = input;
-  const style = STYLE[input.author.id] ?? {};
   // Per-mood window: block every recently used template of a mood, but always leave the
   // least-recently-used ~20% (min 2) free — so long-running floors never run dry.
   const blocked = new Set<string>();
@@ -244,12 +244,21 @@ export function composeLine(input: ComposeInput): Composed | null {
     if (used < size - Math.max(2, Math.ceil(size * 0.2))) blocked.add(key);
     perCategory.set(cat, used + 1);
   }
+  const author = input.author.id;
+  const usable = (l: Line) =>
+    (!l.only || l.only.includes(author)) &&
+    !l.skip?.includes(author) &&
+    (category !== "lore" || !input.gag || l.gag === input.gag) &&
+    (category !== "callback" || !!input.quote);
   const tried = new Set<string>(); // templates rejected this call — never re-drawn
   for (let attempt = 0; attempt < 16; attempt++) {
     const topic = input.parsed.topics.length ? pick(input.parsed.topics, rng) : "tonight";
     // "does elias know about elias' drops" → skip Elias-templates when the topic is already about him.
     const fits = (o: { line: Line; key: string }) =>
-      !blocked.has(o.key) && !tried.has(o.key) && !(o.line.en.includes("{topic}") && /elias/i.test(topic) && /elias/i.test(o.line.en.replace("{topic}", "")));
+      usable(o.line) &&
+      !blocked.has(o.key) &&
+      !tried.has(o.key) &&
+      !(o.line.en.includes("{topic}") && /elias/i.test(topic) && /elias/i.test(o.line.en.replace("{topic}", "")));
     const options = linesFor(category, input.channelId, rng);
     let fresh = options.filter(fits);
     if (!fresh.length) fresh = linesFor(category, "*", () => 1).filter(fits);
@@ -267,55 +276,60 @@ export function composeLine(input: ComposeInput): Composed | null {
         if (key === "npc2") return npc2;
         if (key === "name") return input.replyToName ?? npc;
         if (key === "topic") return topic;
+        if (key === "quote") return input.quote?.[lang] ?? "";
+        if (key === "vlogday") return String(vlogDay(input.now ?? Date.now()));
         const slot = SLOTS[key];
         if (!slot) return key;
         slotIdx[key] ??= Math.floor(rng() * slot.en.length);
         return slot[lang][slotIdx[key]!]!;
       });
-    let en = fill(line.en, "en");
-    let de = fill(line.de, "de");
-
-    // Shared random decisions so both language versions stay in sync.
-    const mention = /\belias\b/i.test(en) && /\belias\b/i.test(de) && rng() < 0.12;
-    const caps = (style.caps ?? 0) + (input.parsed.tone.hype ? 0.06 : 0);
-    const doCaps = en.length < 70 && rng() < caps;
-    const emoji = style.emoji && rng() < style.emoji[1] ? pick(style.emoji[0], rng) : input.parsed.tone.hype && rng() < 0.25 ? pick(["🔥", "🙌", "!!"], rng) : "";
-    const typoAt = style.typo && rng() < style.typo ? Math.floor(rng() * 1000) : -1;
-    const calm = input.parsed.tone.chill && rng() < 0.6;
-
-    const finish = (t: string) => {
-      let out = t;
-      if (mention) out = out.replace(/\belias\b/i, "@Elias");
-      if (style.noEmoji || calm) out = out.replace(EMOJI_RE, "").replace(/\s{2,}/g, " ").trim();
-      if (calm) out = out.replace(/!+/g, "");
-      if (emoji && !style.noEmoji && !calm) out = `${out} ${emoji}`;
-      if (typoAt >= 0) out = typoOnce(out, typoAt);
-      if (doCaps) out = out.toUpperCase().replace(/@ELIAS/g, "@Elias");
-      if (style.proper && out) {
-        out = out.charAt(0).toUpperCase() + out.slice(1);
-        if (!/[.!?…)]$/.test(out) && !ENDS_WITH_EMOJI.test(out)) out += ".";
-      }
-      return out.trim();
-    };
-    en = finish(en);
-    de = finish(de);
-    if (!en || !de) {
-      tried.add(template);
-      continue;
-    }
-    if (!safetyCheck(en).ok || !safetyCheck(de).ok) {
+    const baseEn = fill(line.en, "en");
+    const baseDe = fill(line.de, "de");
+    if (!safetyCheck(baseEn).ok || !safetyCheck(baseDe).ok) {
       tried.add(template); // hard filter, same as the server
       continue;
     }
+    const styled = humanize({
+      en: baseEn,
+      de: baseDe,
+      persona: input.profile?.personality,
+      tone: input.parsed.tone,
+      noSplit: category === "callback",
+      rng,
+    });
+    if (!styled) {
+      tried.add(template);
+      continue;
+    }
+    const all = [styled.whole, ...styled.parts, ...(styled.fix ? [styled.fix] : [])];
+    if (all.some((p) => !safetyCheck(p.en).ok || !safetyCheck(p.de).ok)) {
+      tried.add(template);
+      continue;
+    }
     const useGerman = rng() < (input.profile?.germanRatio ?? 0.5);
-    const mix = useGerman ? de : en;
-    const shown = input.lang === "en" ? en : mix;
-    if (input.recent.has(uniqKey(shown)) || input.recent.has(uniqKey(en)) || (input.recentTexts && nearDuplicate(en, input.recentTexts))) {
+    const mixOf = (p: { en: string; de: string }): ComposedPart => ({ en: p.en, de: p.de, mix: useGerman ? p.de : p.en });
+    const whole = mixOf(styled.whole);
+    const shown = input.lang === "en" ? whole.en : whole.mix;
+    const seen = (t: string) => input.recent.has(uniqKey(t));
+    if (
+      seen(shown) ||
+      seen(whole.en) ||
+      seen(baseEn) ||
+      (input.recentTexts && (nearDuplicate(whole.en, input.recentTexts) || nearDuplicate(baseEn, input.recentTexts)))
+    ) {
       // Slot-free templates can't produce a different text — skip them; others may retry with new slots.
       if (!/\{\w+\}/.test(line.en)) tried.add(template);
       continue;
     }
-    return { en, de, mix, category, template };
+    // A burst whose pieces would repeat a recent line goes out as one message instead.
+    let parts = styled.parts.map(mixOf);
+    let fix = styled.fix ? { ...mixOf(styled.fix), after: styled.fix.after } : undefined;
+    if (parts.length > 1 && parts.some((p) => seen(p.en) || seen(p.mix))) {
+      parts = [whole];
+      fix = undefined;
+    }
+    if (fix && (seen(fix.en) || seen(fix.mix))) fix = undefined;
+    return { ...whole, category, template, parts, fix, gag: line.gag };
   }
   return null;
 }

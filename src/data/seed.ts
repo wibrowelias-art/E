@@ -45,6 +45,18 @@ export function validateSeed(): string[] {
     if (p.age < 20 || p.age > 34) errors.push(`${p.userId}: age ${p.age} outside 20–34`);
     if (p.traits.length < 2 || p.traits.length > 4) errors.push(`${p.userId}: needs 2–4 traits`);
     for (const r of p.relationships) if (!ids.has(r)) errors.push(`${p.userId}: unknown relationship ${r}`);
+    const q = p.personality;
+    if (!q) {
+      errors.push(`${p.userId}: missing personality`);
+      continue;
+    }
+    if (!q.friends.length || !q.rivals.length) errors.push(`${p.userId}: needs friends and rivals`);
+    for (const r of [...q.friends, ...q.rivals]) if (!ids.has(r) || r === p.userId || !r.startsWith("u_") || r === "u_elias") errors.push(`${p.userId}: bad friend/rival ${r}`);
+    for (const r of q.friends) if (q.rivals.includes(r)) errors.push(`${p.userId}: ${r} is both friend and rival`);
+    if (q.typingCpm < 100 || q.typingCpm > 600) errors.push(`${p.userId}: typing speed ${q.typingCpm} cpm out of range`);
+    if (q.slang.en.length !== q.slang.de.length) errors.push(`${p.userId}: slang en/de lists must pair up`);
+    for (const s of q.slang.en) if (looksGerman(s.replace("…", ""))) errors.push(`${p.userId}: German in English slang "${s}"`);
+    for (const v of [q.emojiRate, q.typoRate, q.lowercase, q.chattiness, q.reactRate]) if (v < 0 || v > 1) errors.push(`${p.userId}: rate ${v} outside 0–1`);
   }
   const channelIds = new Set(GUILDS.flatMap((g) => g.channels.map((c) => c.id)));
   const seen = new Map<string, string>();
@@ -72,7 +84,7 @@ export function validateSeed(): string[] {
 /** Phrase-bank validation (stub brain): both languages, known slots, no German in English lines. */
 export function validateBanks(banks: Record<string, Array<{ en: string; de: string }>>, slots: Record<string, { en: string[]; de: string[] }>): string[] {
   const errors: string[] = [];
-  const known = new Set([...Object.keys(slots), "npc", "npc2", "name", "topic"]);
+  const known = new Set([...Object.keys(slots), "npc", "npc2", "name", "topic", "quote", "vlogday"]);
   for (const [k, v] of Object.entries(slots)) if (v.en.length !== v.de.length) errors.push(`slot ${k}: en/de lengths differ`);
   for (const [cat, lines] of Object.entries(banks)) {
     lines.forEach((l, i) => {
